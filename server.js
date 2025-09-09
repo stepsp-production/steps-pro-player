@@ -22,7 +22,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط الميديا (m3u8/ts/m4s)
+// لا نضغط الميديا
 app.use(
   compression({
     filter: (req, res) => {
@@ -51,7 +51,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Keep-Alive
+// Keep-Alive للوكلاء
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
@@ -139,14 +139,22 @@ app.get("/hls/*", async (req, res) => {
       up.on("data", (c) => (data += c));
       up.on("end", () => {
         const rewritten = rewriteManifest(data, req.originalUrl);
-        res.status(200).type("application/vnd.apple.mpegurl").set("Cache-Control", "no-store, must-revalidate").send(rewritten);
+        res
+          .status(200)
+          .type("application/vnd.apple.mpegurl")
+          .set("Cache-Control", "no-store, must-revalidate")
+          .send(rewritten);
       });
       up.on("error", () => res.status(502).send("Upstream error"));
       return;
     }
 
     res.status(up.statusCode || 200);
-    res.on("close", () => { try { up.destroy(); } catch {} });
+    res.on("close", () => {
+      try {
+        up.destroy();
+      } catch {}
+    });
     up.pipe(res);
   } catch (e) {
     console.error(e);
