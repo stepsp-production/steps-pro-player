@@ -22,7 +22,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط ملفات الفيديو (m3u8/m4s/ts) — نضغط باقي الملفات فقط
+// لا نضغط الميديا (m3u8/ts/m4s)
 app.use(
   compression({
     filter: (req, res) => {
@@ -33,11 +33,8 @@ app.use(
 );
 
 app.use(cors());
-
-// ملفات الواجهة
 app.use(express.static(path.join(__dirname, "public")));
 
-// ترويسات عامة + أنواع المحتوى
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "*");
@@ -54,7 +51,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ===== Keep-Alive لوصلات الـ proxy =====
+// Keep-Alive
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
@@ -112,7 +109,7 @@ function rewriteManifest(text, basePath) {
     .join("\n");
 }
 
-// ===== Proxy HLS =====
+// Proxy HLS
 app.get("/hls/*", async (req, res) => {
   try {
     const upstreamUrl = ORIGIN_BASE + req.originalUrl;
@@ -125,44 +122,31 @@ app.get("/hls/*", async (req, res) => {
 
     const { up } = await fetchWithRedirects(upstreamUrl, headers);
 
-    // مرر بعض الترويسات
     if (up.headers["content-type"]) res.set("Content-Type", up.headers["content-type"]);
     if (up.headers["content-length"]) res.set("Content-Length", up.headers["content-length"]);
     if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
     if (up.headers["content-range"]) res.set("Content-Range", up.headers["content-range"]);
 
-    // استجابة خطأ من المصدر
     if ((up.statusCode || 0) >= 400) {
       res.status(up.statusCode).end();
       up.resume();
       return;
     }
 
-    // ملفات المانيفست: نعيد كتابتها للمرور عبر البروكسي
     if (/\.m3u8(\?.*)?$/i.test(req.path)) {
       let data = "";
       up.setEncoding("utf8");
       up.on("data", (c) => (data += c));
       up.on("end", () => {
         const rewritten = rewriteManifest(data, req.originalUrl);
-        res
-          .status(200)
-          .type("application/vnd.apple.mpegurl")
-          .set("Cache-Control", "no-store, must-revalidate")
-          .send(rewritten);
+        res.status(200).type("application/vnd.apple.mpegurl").set("Cache-Control", "no-store, must-revalidate").send(rewritten);
       });
       up.on("error", () => res.status(502).send("Upstream error"));
       return;
     }
 
-    // المقاطع: مررها مباشرة
     res.status(up.statusCode || 200);
-    // تنظيف عند إغلاق اتصال العميل
-    res.on("close", () => {
-      try {
-        up.destroy();
-      } catch {}
-    });
+    res.on("close", () => { try { up.destroy(); } catch {} });
     up.pipe(res);
   } catch (e) {
     console.error(e);
@@ -170,26 +154,7 @@ app.get("/hls/*", async (req, res) => {
   }
 });
 
-// فحص الصحة
 app.get("/health", (_req, res) => res.type("text").send("ok"));
-
-// مشغل بسيط (اختياري)
-app.get("/player", (req, res) => {
-  const src = req.query.src || "/hls/live/playlist.m3u8";
-  res.type("html").send(`<!doctype html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>HLS Player</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-<style>html,body{margin:0;background:#000} video{width:100vw;height:100vh;object-fit:contain}</style>
-</head><body>
-<video id="v" controls muted playsinline></video>
-<script>
-const v=document.getElementById('v'); const src=${JSON.stringify(src)};
-if (window.Hls && Hls.isSupported()) { const h=new Hls(); h.loadSource(src); h.attachMedia(v); }
-else { v.src=src; }
-</script>
-</body></html>`);
-});
 
 app.listen(PORT, () => {
   console.log("Server on", PORT, "→ origin:", ORIGIN_BASE, "insecureTLS:", ALLOW_INSECURE_TLS);
