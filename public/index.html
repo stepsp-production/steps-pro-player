@@ -43,8 +43,6 @@
 #scrub{-webkit-appearance:none;appearance:none;width:320px;height:6px;border-radius:999px;background:#ffffff30;outline:none;margin:0 8px}
 #scrub::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid #0006;cursor:pointer}
 #timeLabel{color:#fff;font-size:12px;min-width:108px;text-align:center}
-#delayGroup{display:flex;align-items:center;gap:6px;margin-inline-start:10px}
-#delayRange{-webkit-appearance:none;appearance:none;width:140px;height:6px;border-radius:999px;background:#ffffff30;outline:none}
 
 button{-webkit-tap-highlight-color:transparent;appearance:none;border:0;outline:0;cursor:pointer;background:var(--btn-bg);color:var(--btn-txt);padding:11px 12px;font-size:12px;font-weight:800;border-radius:12px;letter-spacing:.2px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 8px 18px #000a,0 0 0 0 var(--btn-ring);transition:all .12s;opacity:.35}
 body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shadow:0 12px 26px #000c,0 0 0 6px var(--btn-ring)} button:active{background:var(--btn-bg-a);transform:translateY(1px)}
@@ -54,7 +52,7 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
 #gatePlay{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,rgba(0,0,0,.55),rgba(0,0,0,.2));backdrop-filter:blur(2px)}
 #gatePlay.hidden{display:none}
 .gate-card{background:var(--panel-bg);border:1px solid var(--panel-bd);border-radius:18px;padding:18px 20px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 40px rgba(0,0,0,.45)}
-.gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bد);color:#fff;background:#111a;font-size:18px}
+.gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bd);color:#fff;background:#111a;font-size:18px}
 #startBtn{min-width:160px}
 
 #camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px)}
@@ -83,39 +81,19 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
       <div class="icon">▶</div>
       <div>
         <div style="color:#fff;font-weight:800;margin-bottom:6px">ابدأ التشغيل والمزامنة</div>
-        <div style="font-size:12px;color:#eaeaf0b3">سيظهر الشريط بعد الضغط على تشغيل</div>
+        <div style="font-size:12px;color:#eaeaf0b3">سيظهر شريط التقديم/التأخير بعد الضغط على تشغيل</div>
       </div>
       <button id="startBtn" aria-label="ابدأ التشغيل الآن">تشغيل/بدء المزامنة</button>
     </div>
   </div>
 
-  <!-- أدوات -->
-  <div id="utilityControls" class="vertical">
-    <div class="group">
-      <button id="btnSplit" title="تقسيم">تقسيم</button>
-      <button id="btnFill"  title="ملء المحتوى">ملء</button>
-    </div>
-    <span class="divider"></span>
-    <div class="group">
-      <button id="btnSound" data-muted="true" title="صوت">
-        <span class="on">🔊</span><span class="off">🔇</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- الشريط -->
+  <!-- الشريط الموحّد -->
   <div id="globalControls" class="hidden" role="group" aria-label="تحكم موحّد">
     <button id="gBack" title="⏪ -5s">⏪ 5s</button>
     <button id="gPlay" title="⏯">⏯</button>
     <button id="gFwd"  title="+5s ⏩">5s ⏩</button>
     <input id="scrub" type="range" min="0" max="0" value="0" step="0.01" aria-label="شريط التقدم">
     <div id="timeLabel">00:00 / 00:00</div>
-    <div id="delayGroup" title="تأخير موحّد داخل نافذة البث (ثواني)">
-      <button id="delayMinus">-</button>
-      <input id="delayRange" type="range" min="0" max="20" step="0.5" value="5">
-      <button id="delayPlus">+</button>
-      <div id="delayLabel" style="color:#fff;font:12px system-ui;">Delay: 5.0s</div>
-    </div>
   </div>
 
   <!-- الكاميرات -->
@@ -145,10 +123,11 @@ window.sources = {
 </script>
 
 <script>
-/* ========= إعداد HLS عام ========= */
+/* ========= إعداد عام ========= */
 const hasUrl = (u)=> typeof u==='string' && /^https?:\/\/.+/.test(u);
 const MIRRORS_ENABLED = false; // لا مرايا
-let performanceLightMode = true;
+const SAFETY_EDGE = 0.25;      // نبتعد عن الحافة قليلاً
+let started=false, inited=false;
 
 const HLS_CONFIG_BASE = {
   lowLatencyMode:false,
@@ -175,7 +154,7 @@ const HLS_CONFIG_BASE = {
   fpsDroppedMonitoringThreshold:0.15,
   xhrSetup:(xhr)=>{ try{xhr.withCredentials=false;}catch(e){} }
 };
-const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:18, backBufferLength:40 };
+const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:14, backBufferLength:40 };
 
 /* ——— إجبار AVC فقط ——— */
 function isAvc(l){ return /avc1/i.test(l?.codecs || l?.codecsVideo || ""); }
@@ -207,13 +186,8 @@ function clampToSeekable(video,t){
   if(!m) return t;
   const safeStart = m.start + 0.02;
   const safeEnd   = m.end   - 0.02;
-  if(safeEnd <= safeStart) return m.start; // نافذة صغيرة جدًا — ابقَ عند البداية الآمنة
+  if(safeEnd <= safeStart) return m.start;
   return Math.min(Math.max(t, safeStart), safeEnd);
-}
-function findNextBufferedStart(video){
-  try{ const t=video.currentTime||0, r=video.buffered; if(!r||!r.length) return null;
-    for(let i=0;i<r.length;i++){ const s=r.start(i), e=r.end(i); if(t<s) return s+0.04; if(t>=s&&t<=e) return null; } }catch(e){}
-  return null;
 }
 async function healGapIfNeeded(video){
   try{
@@ -229,45 +203,20 @@ async function healGapIfNeeded(video){
 async function waitForSeekable(video, timeoutMs=8000){
   const t0=performance.now();
   return new Promise((resolve)=>{ (function loop(){
-    try{
-      const r=video?.seekable;
-      if(r&&r.length){
-        const size = r.end(r.length-1)-r.start(r.length-1);
-        if(size>0.25) return resolve(true);
-      }
-    }catch(e){}
+    try{ const r=video?.seekable; if(r&&r.length){ return resolve(true); } }catch(e){}
     if(performance.now()-t0>timeoutMs) return resolve(false);
     setTimeout(loop,120);
   })(); });
 }
 
-/* ========= مزامنة وتأخير ذكي ========= */
+/* ========= مزامنة ========= */
 const SYNC={ main:{pdtOffset:null}, active:{pdtOffset:null} };
 function pdtAlignedTarget(mainCt){ const offM=SYNC.main.pdtOffset, offA=SYNC.active.pdtOffset; if(offM!=null && offA!=null) return (offM + (mainCt||0)) - offA; return mainCt; }
-
-let globalDelaySec = 5;
-let appliedDelaySec = 5;
-const MIN_DELAY = 0.15;
-const SAFETY_MARGIN = 0.35;
-function computeSafeDelay(mainVideo){
-  const m=getSeekableRange(mainVideo);
-  if(!m){ appliedDelaySec = Math.max(MIN_DELAY, Math.min(globalDelaySec, 2)); return; }
-  // أكبر تأخير مسموح داخل النافذة مع هامش أمان
-  const maxDelay = Math.max(MIN_DELAY, m.size - SAFETY_MARGIN);
-  // لو النافذة أصغر من (MIN_DELAY + SAFETY)، استخدم جزءًا صغيرًا داخلها
-  if(m.size < (MIN_DELAY + SAFETY_MARGIN)) {
-    appliedDelaySec = Math.max(0.05, m.size * 0.5);
-  } else {
-    appliedDelaySec = Math.max(MIN_DELAY, Math.min(globalDelaySec, maxDelay));
-  }
-}
-function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
 
 /* ========= DOM ========= */
 const root=document.getElementById('playerContainer');
 const mainContainer=document.getElementById('mainPreview');
 const camContainer=document.getElementById('activeCam');
-const freezeLayer=document.getElementById('freezeLayer');
 const gatePlay=document.getElementById('gatePlay');
 const startBtn=document.getElementById('startBtn');
 const btnSplit=document.getElementById('btnSplit');
@@ -279,16 +228,12 @@ const gBack=document.getElementById('gBack');
 const gFwd=document.getElementById('gFwd');
 const scrub=document.getElementById('scrub');
 const timeLabel=document.getElementById('timeLabel');
-const delayRange=document.getElementById('delayRange');
-const delayMinus=document.getElementById('delayMinus');
-const delayPlus=document.getElementById('delayPlus');
-const delayLabel=document.getElementById('delayLabel');
 
 let mainPlayer, activePlayer, currentCam="cam2";
-let splitMode=0, isMainFull=false, fillMode=false, started=false, inited=false;
+let splitMode=0, isMainFull=false, fillMode=false;
 let ticker=null,isScrubbing=false;
 
-/* ========= HLS مع إجبار AVC ========= */
+/* ========= إنشاء فيديو + HLS/AVC ========= */
 function attachHlsWithAvc(video, url, role){
   const hls = new Hls({...HLS_CONFIG});
   video.__hls = hls;
@@ -325,7 +270,7 @@ function attachHlsWithAvc(video, url, role){
   });
 
   hls.on(Hls.Events.ERROR,(_,err)=>{
-    const t=err.type, det=String(err.details||'');
+    const t=err.type;
     if(t===Hls.ErrorTypes.NETWORK_ERROR){ try{ hls.stopLoad(); hls.startLoad(); }catch(e){} healGapIfNeeded(video); return; }
     if(t===Hls.ErrorTypes.MEDIA_ERROR){
       try{
@@ -391,23 +336,11 @@ function positionUtilityDock(){
   }
 }
 window.addEventListener('resize', positionUtilityDock);
+window.addEventListener('orientationchange', ()=>setTimeout(positionUtilityDock,120));
 
-function initPlayers(){
-  if(!mainPlayer){ mainPlayer=createVideo(mainContainer, sources.main, 'main'); }
-  activePlayer=createVideo(camContainer, sources[currentCam], 'active');
-}
-function initPlayersOnce(){
-  if(inited) return; inited=true;
-  initPlayers();
-  document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
-    const id=btn.getAttribute('data-cam');
-    if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
-  });
-  positionUtilityDock();
-  updateDelayUi();
-}
+let ticker=null,isScrubbing=false;
+function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
 
-async function playEntity(ent, muted=true){ try{ ent.muted=!!muted; await ent.play(); }catch(e){} }
 function getMainTime(){ return Promise.resolve(mainPlayer?.currentTime || 0); }
 function getMainDuration(){
   if(mainPlayer instanceof HTMLVideoElement){
@@ -420,31 +353,23 @@ function seekMainTo(t){ if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.c
 function seekActiveTo(t){ if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
 async function syncCams(){ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); }
 
-function updateDelayUi(){ delayLabel.textContent = `Delay: ${globalDelaySec.toFixed(1)}s`; }
+async function startPlayback(){
+  if(started) return;
+  started=true;
+  gatePlay.classList.add('hidden');
+  globalControls.classList.remove('hidden');
 
-async function applyGlobalDelay(){
-  const mv = mainContainer.querySelector('video'); if(!mv) return;
-  computeSafeDelay(mv);
-  const m=getSeekableRange(mv); if(!m) return;
-  // إذا كانت النافذة صغيرة جدًا، لا نطبّق التأخير الآن
-  if(m.size < (MIN_DELAY + SAFETY_MARGIN + 0.05)) return;
-  const target = clampToSeekable(mv, m.end - appliedDelaySec);
-  await seekMainTo(target);
-  await seekActiveTo(pdtAlignedTarget(target));
-}
+  await mainPlayer.play().catch(()=>{});
+  await activePlayer.play().catch(()=>{});
 
-function maintainDelayLoop(){
-  const mv = mainContainer.querySelector('video'); if(!mv || mv.paused) return;
-  const m=getSeekableRange(mv); if(!m) return;
-  computeSafeDelay(mv);
-  // لا نحاول التصحيح لو النافذة أقل من 0.6s تقريبًا
-  if(m.size < 0.6) return;
-  const current=mv.currentTime||0;
-  const diff=(m.end-current)-appliedDelaySec;
-  if (Math.abs(diff) > 0.7 && !isScrubbing) {
-    const target = clampToSeekable(mv, current + diff);
-    seekMainTo(target).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
-  }
+  // انتظر نافذة قابلة للـseek ثم قف قرب الحافة بشكل آمن
+  const mv = mainContainer.querySelector('video');
+  await waitForSeekable(mv);
+  const r = getSeekableRange(mv);
+  if(r){ await seekMainTo(Math.max(r.start, r.end - SAFETY_EDGE)); await syncCams(); }
+
+  startTimeTicker();
+  positionUtilityDock();
 }
 
 function startTimeTicker(){
@@ -455,7 +380,10 @@ function startTimeTicker(){
     if(mainPlayer instanceof HTMLVideoElement){ const r=mainPlayer.seekable; if(r&&r.length){ d=r.end(r.length-1)||d; } }
     if(d&&isFinite(d)) scrub.max=d;
     scrub.value=ct||0; timeLabel.textContent=`${fmt(ct)} / ${fmt(d||0)}`;
-    maintainDelayLoop();
+    // تعويم الفجوات اللطيف لو حصل انتظار
+    healGapIfNeeded(mainContainer.querySelector('video'));
+    healGapIfNeeded(activePlayer);
+    // تعديل بسيط لمعدل تشغيل الكاميرا للحاق بالرئيسي
     const target=pdtAlignedTarget(ct); const delta=(activePlayer?.currentTime||0) - target;
     if(!isNaN(delta)) {
       const ad=Math.abs(delta);
@@ -467,48 +395,57 @@ function startTimeTicker(){
   }, 300);
 }
 
-async function startPlayback(){
-  if(started) return;
-  started=true;
-  gatePlay.classList.add('hidden');
-  globalControls.classList.remove('hidden');
-
-  await playEntity(mainPlayer,true);
-  await playEntity(activePlayer,true);
-
-  // انتظر نافذة قابلة للـseek ثم طبّق تأخير آمن فقط إن كان ممكنًا
-  await waitForSeekable(mainContainer.querySelector('video'));
-  await applyGlobalDelay();
-  await syncCams();
-
-  startTimeTicker();
+/* ========= تهيئة ========= */
+function initPlayers(){
+  if(!mainPlayer){ mainPlayer=createVideo(mainContainer, sources.main, 'main'); }
+  activePlayer=createVideo(camContainer, sources[currentCam], 'active');
+}
+function initPlayersOnce(){
+  if(inited) return; inited=true;
+  initPlayers();
+  document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
+    const id=btn.getAttribute('data-cam');
+    if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
+  });
   positionUtilityDock();
 }
 
 /* ========= تحكمات ========= */
-document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
+document.getElementById('camControls').addEventListener('click',(e)=>{
+  const b=e.target.closest('button[data-cam]'); if(!b) return;
+  const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
   currentCam=id;
   const newcomer=createVideo(camContainer, sources[id], 'active');
-  newcomer.addEventListener('canplay', async ()=>{ activePlayer=newcomer; if(started){ await playEntity(activePlayer,true); await syncCams(); } }, {once:true});
+  newcomer.addEventListener('canplay', async ()=>{
+    activePlayer=newcomer;
+    if(started){ await activePlayer.play().catch(()=>{}); await syncCams(); }
+  }, {once:true});
 });
 
 btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } root.classList.toggle('split',splitMode!==0); root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); positionUtilityDock(); });
 btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode; root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); positionUtilityDock(); });
+
 btnSound.addEventListener('click', ()=>{
   if(!started) return;
-  if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.muted = !mainPlayer.muted; if(!mainPlayer.muted) mainPlayer.play().catch(()=>{}); btnSound.dataset.muted=String(!!mainPlayer.muted); }
+  if(mainPlayer instanceof HTMLVideoElement){
+    mainPlayer.muted = !mainPlayer.muted;
+    if(!mainPlayer.muted) mainPlayer.play().catch(()=>{});
+    btnSound.dataset.muted=String(!!mainPlayer.muted);
+  }
 });
+
 gBack.addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t-5); await seekActiveTo(pdtAlignedTarget(t-5)); });
 gFwd .addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t+5); await seekActiveTo(pdtAlignedTarget(t+5)); });
 gPlay.addEventListener('click', async()=>{ if(!started) return; if(mainPlayer.paused){ await mainPlayer.play().catch(()=>{});} else mainPlayer.pause(); await syncCams(); });
-scrub.addEventListener('input', ()=>{ if(!started) return; isScrubbing=true; });
-scrub.addEventListener('change', async()=>{ if(!started) return; const nt=parseFloat(scrub.value)||0; await seekMainTo(nt); await seekActiveTo(pdtAlignedTarget(nt)); isScrubbing=false; });
 
-function updateDelayUi(){ delayLabel.textContent = `Delay: ${globalDelaySec.toFixed(1)}s`; }
-delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; updateDelayUi(); });
-delayRange.addEventListener('change', ()=>{ if(started) applyGlobalDelay(); });
-delayMinus.addEventListener('click', ()=>{ delayRange.value = Math.max(0, (parseFloat(delayRange.value)||0)-0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
-delayPlus .addEventListener('click', ()=>{ delayRange.value = Math.min(20,(parseFloat(delayRange.value)||0)+0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
+scrub.addEventListener('input', ()=>{ if(!started) return; isScrubbing=true; });
+scrub.addEventListener('change', async()=>{
+  if(!started) return;
+  const nt=parseFloat(scrub.value)||0;
+  await seekMainTo(nt);
+  await seekActiveTo(pdtAlignedTarget(nt));
+  isScrubbing=false;
+});
 
 startBtn.addEventListener('click', startPlayback);
 window.onYouTubeIframeAPIReady=()=>{ initPlayersOnce(); };
