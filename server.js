@@ -21,7 +21,9 @@ const DEBUG = String(process.env.DEBUG_HLS || "false") === "true";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ✔️ أنشئ التطبيق أولاً
 const app = express();
+app.disable("x-powered-by");
 app.use(morgan("tiny"));
 app.use(cors());
 
@@ -38,11 +40,11 @@ function upstreamHeaders(req) {
     Host: new URL(ORIGIN_BASE).host,
     Connection: "keep-alive",
     Accept: "*/*",
-    "Accept-Encoding": "identity", // نطلب المحتوى غير مضغوط لفك/إعادة الكتابة
+    "Accept-Encoding": "identity", // نطلبه غير مضغوط
     "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
   };
   if (req.headers.range) h.Range = req.headers.range;
-  return h; // لا نمرر Origin/Referer/CF...
+  return h; // لا نمرّر Origin/Referer
 }
 
 function requestOnce(urlStr, headers) {
@@ -58,7 +60,7 @@ function requestOnce(urlStr, headers) {
   });
 }
 
-// تتبّع التحويلات 3xx
+// تتبّع تحويلات 3xx
 async function fetchWithRedirects(urlStr, headers, max = MAX_REDIRECTS) {
   let current = urlStr;
   for (let i = 0; i <= max; i++) {
@@ -78,7 +80,7 @@ async function fetchWithRedirects(urlStr, headers, max = MAX_REDIRECTS) {
 // حوّل أي مرجع (نسبي/مطلق) إلى /hls/* بدون تكرار /hls
 function refToProxy(ref, baseAbsUrl) {
   try {
-    const abs = new URL(ref, baseAbsUrl); // يحل النسبي أيضًا
+    const abs = new URL(ref, baseAbsUrl);       // يحل النسبي أيضًا
     let p = abs.pathname.replace(/^\/hls/i, ""); // لا نضاعف /hls
     return `/hls${p}${abs.search || ""}`;
   } catch {
@@ -101,6 +103,7 @@ function rewriteManifest(text, baseAbsUrl) {
     "EXT-X-SESSION-DATA",
   ];
   const TAGS_RE = new RegExp(`^#(?:${TAGS.join("|")}):`, "i");
+
   return text
     .split("\n")
     .map((line) => {
@@ -117,8 +120,8 @@ function rewriteManifest(text, baseAbsUrl) {
 // راوتر خاص بالبث
 const hlsRouter = express.Router();
 
+// MIME + Cache لكل أنواع HLS
 hlsRouter.use((req, res, next) => {
-  // ترويسات MIME وكاش
   if (/\.m3u8$/i.test(req.path)) {
     res.type("application/vnd.apple.mpegurl");
     res.setHeader("Cache-Control", "no-store, must-revalidate");
@@ -140,8 +143,7 @@ hlsRouter.use((req, res, next) => {
 
 hlsRouter.get("/*", async (req, res) => {
   try {
-    // req.originalUrl يتضمن /hls/... — نمرره كما هو إلى الأصل
-    const upstreamUrl = ORIGIN_BASE + req.originalUrl;
+    const upstreamUrl = ORIGIN_BASE + req.originalUrl; // يمر كما هو إلى الأصل
     const { up, finalUrl } = await fetchWithRedirects(upstreamUrl, upstreamHeaders(req));
 
     const isManifest = /\.m3u8(\?.*)?$/i.test(req.originalUrl);
@@ -153,7 +155,8 @@ hlsRouter.get("/*", async (req, res) => {
     }
 
     if ((up.statusCode || 0) >= 400) {
-      res.status(up.statusCode).end();
+      // لا نسمح للواجهة بإرجاع HTML داخل /hls
+      res.status(up.statusCode).type("text").end(`Upstream error ${up.statusCode}`);
       up.resume();
       return;
     }
@@ -163,7 +166,7 @@ hlsRouter.get("/*", async (req, res) => {
       up.setEncoding("utf8");
       up.on("data", (c) => (raw += c));
       up.on("end", () => {
-        const out = rewriteManifest(raw, finalUrl); // حلّ النسبي أولاً باستخدام finalUrl
+        const out = rewriteManifest(raw, finalUrl);
         if (DEBUG) console.log("BASE=", finalUrl, "\n", out.slice(0, 800));
         res
           .status(200)
@@ -171,7 +174,7 @@ hlsRouter.get("/*", async (req, res) => {
           .set("Cache-Control", "no-store, must-revalidate")
           .send(out);
       });
-      up.on("error", () => res.status(502).send("Upstream error"));
+      up.on("error", () => res.status(502).type("text").send("Upstream error"));
       return;
     }
 
@@ -184,11 +187,11 @@ hlsRouter.get("/*", async (req, res) => {
     up.pipe(res);
   } catch (e) {
     console.error(e);
-    res.status(500).send("Proxy error");
+    res.status(500).type("text").send("Proxy error");
   }
 });
 
-// اربط الراوتر قبل أي static:
+// ✅ اربط راوتر البث قبل أي static
 app.use("/hls", hlsRouter);
 
 // ===== بقية التطبيق (الواجهة) =====
@@ -199,11 +202,14 @@ app.use(
   })
 );
 
+// ملفات الواجهة
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/player", (req, res) => {
   const src = req.query.src || "/hls/live/playlist.m3u8";
-  res.type("html").send(`<!doctype html>
+  res
+    .type("html")
+    .send(`<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>HLS Player</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
