@@ -8,13 +8,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { URL } from "url";
 
-// ======= CONFIG =======
-const ORIGIN_BASE = process.env.ORIGIN_BASE || "https://stream.mux.com";
+// ======= CONFIG (اضبط ORIGIN_BASE على سيرفرك) =======
+const ORIGIN_BASE = process.env.ORIGIN_BASE || "http://46.152.116.98";
 const PORT = process.env.PORT || 10000;
 const ALLOW_INSECURE_TLS = String(process.env.ALLOW_INSECURE_TLS || "true") === "true";
 const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS || 15000);
 const MAX_REDIRECTS = Number(process.env.MAX_REDIRECTS || 5);
-// ======================
+// =====================================================
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,18 +92,25 @@ async function fetchWithRedirects(urlStr, headers, maxRedirects = MAX_REDIRECTS)
   throw new Error("Too many redirects");
 }
 
-// مطلق -> عبر بروكسي /hls
+// تحويل مطلق -> مسار بروكسي /hls مع منع مضاعفة /hls
 function absoluteToProxy(u) {
   try {
     const url = new URL(u);
-    return `/hls${url.pathname}${url.search || ""}`;
+    let p = url.pathname || "/";
+    // إذا كان المسار يبدأ بـ /hls/ لدى الأصل، لا نضاعف
+    p = p.replace(/^\/hls/i, "");
+    return `/hls${p}${url.search || ""}`;
   } catch {
-    if (typeof u === "string" && u.startsWith("/")) return `/hls${u}`;
+    // مسار مطلق بدون بروتوكول ("/..."):
+    if (typeof u === "string" && u.startsWith("/")) {
+      const p = u.replace(/^\/hls/i, "");
+      return `/hls${p}`;
+    }
     return u;
   }
 }
 
-// إعادة كتابة manifest (يشمل URI داخل التاجّات)
+// إعادة كتابة manifest بالكامل (سطور + URI داخل التاجّات)
 function rewriteManifest(text, baseDirProxy) {
   const ABS_HTTP = /^(https?:)?\/\//i;
   const TAGS_WITH_URI = [
@@ -120,15 +127,15 @@ function rewriteManifest(text, baseDirProxy) {
     .map((line) => {
       const t = line.trim();
 
-      // وسوم فيها URI="..."
+      // 1) وسوم تملك URI="..."
       if (TAGS_RE.test(t)) {
         return line.replace(/URI="([^"]+)"/gi, (_m, uri) => {
           if (ABS_HTTP.test(uri) || uri.startsWith("/")) return `URI="${absoluteToProxy(uri)}"`;
-          return `URI="${baseDirProxy}${uri}"`; // نسبي -> داخل مجلد الـPlayback ID
+          return `URI="${baseDirProxy}${uri}"`;
         });
       }
 
-      // السطور العادية
+      // 2) سطور عادية (مقاطع/قوائم فرعية)
       if (!t || t.startsWith("#")) return line;
       if (ABS_HTTP.test(t) || t.startsWith("/")) return absoluteToProxy(t);
       return baseDirProxy + t; // نسبي
@@ -136,27 +143,25 @@ function rewriteManifest(text, baseDirProxy) {
     .join("\n");
 }
 
-// احسب baseDirProxy بشكل صحيح لمُعرِّف Mux
+// حساب مجلد الأساس تحت /hls/، دون تكرار /hls
 function computeBaseDirProxy(reqOriginalUrl) {
   const noQuery = reqOriginalUrl.replace(/[?#].*$/, "");
-  // حالة master: /hls/<ID>.m3u8 => /hls/<ID>/
-  const m = noQuery.match(/^\/hls\/([^/?#]+)\.m3u8$/i);
-  if (m) return `/hls/${m[1]}/`;
-  // حالة القوائم الداخلية: /hls/<ID>/.../foo.m3u8 => أبقي المجلد كما هو
+  // أمثلة: /hls/live/playlist.m3u8 => /hls/live/
+  //        /hls/abc/level_1.m3u8   => /hls/abc/
   return noQuery.replace(/\/[^/]*$/, "/");
 }
 
-// Proxy HLS عبر /hls/*
+// Proxy HLS عبر /hls/* (تمرير كما هو إلى الأصل 46.152.116.98)
 app.get("/hls/*", async (req, res) => {
   try {
-    const upstreamPathWithQuery = req.originalUrl.replace(/^\/hls/, "");
-    const upstreamUrl = ORIGIN_BASE + upstreamPathWithQuery;
+    // هنا لا نزيل /hls — سيرفرك يستخدمها أصلًا
+    const upstreamUrl = ORIGIN_BASE + req.originalUrl;
 
     const headers = {
       ...req.headers,
       host: new URL(ORIGIN_BASE).host,
       Connection: "keep-alive",
-      "accept-encoding": "identity",
+      "accept-encoding": "identity", // اطلب من الأصل عدم الضغط ليسهل إعادة الكتابة
     };
     delete headers["Accept-Encoding"];
 
@@ -169,6 +174,7 @@ app.get("/hls/*", async (req, res) => {
       if (up.headers["content-length"]) res.set("Content-Length", up.headers["content-length"]);
       if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
       if (up.headers["content-range"]) res.set("Content-Range", up.headers["content-range"]);
+      if (up.headers["cache-control"]) res.set("Cache-Control", up.headers["cache-control"]);
     }
 
     if ((up.statusCode || 0) >= 400) {
@@ -204,6 +210,24 @@ app.get("/hls/*", async (req, res) => {
 });
 
 app.get("/health", (_req, res) => res.type("text").send("ok"));
+
+// صفحة اختبار بسيطة (اختياري)
+app.get("/player", (req, res) => {
+  const src = req.query.src || "/hls/live/playlist.m3u8";
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HLS Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<style>html,body{margin:0;background:#000} video{width:100vw;height:100vh;object-fit:contain}</style>
+</head><body>
+<video id="v" controls muted playsinline></video>
+<script>
+const v=document.getElementById('v'); const src=${JSON.stringify(src)};
+if (window.Hls && Hls.isSupported()) { const h=new Hls(); h.loadSource(src); h.attachMedia(v); }
+else { v.src=src; }
+</script>
+</body></html>`);
+});
 
 app.listen(PORT, () => {
   console.log("Server on", PORT, "→ origin:", ORIGIN_BASE, "insecureTLS:", ALLOW_INSECURE_TLS);
