@@ -9,7 +9,6 @@ import { fileURLToPath } from "url";
 import { URL } from "url";
 
 // ======= CONFIG =======
-// اجعله يوجّه إلى مزوّدك. افتراضيًا Mux:
 const ORIGIN_BASE = process.env.ORIGIN_BASE || "https://stream.mux.com";
 const PORT = process.env.PORT || 10000;
 const ALLOW_INSECURE_TLS = String(process.env.ALLOW_INSECURE_TLS || "true") === "true";
@@ -23,13 +22,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط الميديا
+// لا نضغط ملفات الفيديو/المقاطع
 app.use(
   compression({
-    filter: (req, res) => {
-      if (/\.(m3u8|ts|m4s)$/i.test(req.path)) return false;
-      return compression.filter(req, res);
-    },
+    filter: (req, res) => (!/\.(m3u8|ts|m4s)$/i.test(req.path) && compression.filter(req, res)),
   })
 );
 
@@ -90,7 +86,8 @@ async function fetchWithRedirects(urlStr, headers, maxRedirects = MAX_REDIRECTS)
   throw new Error("Too many redirects");
 }
 
-function rewriteManifest(text, basePath) {
+// إعادة كتابة روابط الـmanifest لتعود عبر /hls
+function rewriteManifest(text, baseDir) {
   return text
     .split("\n")
     .map((line) => {
@@ -99,13 +96,13 @@ function rewriteManifest(text, basePath) {
       if (/^https?:\/\//i.test(t)) {
         try {
           const url = new URL(t);
-          return `${basePath}${url.pathname}${url.search || ""}`;
+          return `/hls${url.pathname}${url.search || ""}`;
         } catch {
           return line;
         }
       }
-      const parent = basePath.replace(/\/[^/]*$/, "/");
-      return parent + t;
+      // مسار نسبي -> نفس مجلد الـmanifest تحت /hls/
+      return baseDir + t;
     })
     .join("\n");
 }
@@ -113,7 +110,15 @@ function rewriteManifest(text, basePath) {
 // Proxy HLS عبر /hls/*
 app.get("/hls/*", async (req, res) => {
   try {
-    const upstreamUrl = ORIGIN_BASE + req.originalUrl;
+    // أزل بادئة /hls من الطلب قبل إرساله للأصل (Mux لا يستخدم /hls)
+    const upstreamPathWithQuery = req.originalUrl.replace(/^\/hls/, "");
+    const upstreamUrl = ORIGIN_BASE + upstreamPathWithQuery;
+
+    // لحساب روابط نسبية داخل الـmanifest (مثل index.m3u8 / segments)
+    const baseDir = req.originalUrl
+      .replace(/[?#].*$/, "")        // احذف الاستعلام
+      .replace(/\/[^/]*$/, "/");     // احتفظ بالمجلد فقط
+
     const headers = {
       ...req.headers,
       host: new URL(ORIGIN_BASE).host,
@@ -139,7 +144,7 @@ app.get("/hls/*", async (req, res) => {
       up.setEncoding("utf8");
       up.on("data", (c) => (data += c));
       up.on("end", () => {
-        const rewritten = rewriteManifest(data, req.originalUrl);
+        const rewritten = rewriteManifest(data, baseDir);
         res
           .status(200)
           .type("application/vnd.apple.mpegurl")
