@@ -22,10 +22,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط ملفات الفيديو
+// لا نضغط الميديا
 app.use(
   compression({
-    filter: (req, res) => (!/\.(m3u8|ts|m4s)$/i.test(req.path) && compression.filter(req, res)),
+    filter: (req, res) => (!/\.(m3u8|ts|m4s|mp4|key)$/i.test(req.path) && compression.filter(req, res)),
   })
 );
 
@@ -44,6 +44,12 @@ app.use((req, res, next) => {
   } else if (/\.(m4s)$/i.test(req.path)) {
     res.setHeader("Content-Type", "video/iso.segment");
     res.setHeader("Cache-Control", "public, max-age=15, immutable");
+  } else if (/\.(mp4)$/i.test(req.path)) {
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Cache-Control", "public, max-age=15, immutable");
+  } else if (/\.(key)$/i.test(req.path)) {
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "no-store");
   }
   next();
 });
@@ -86,67 +92,69 @@ async function fetchWithRedirects(urlStr, headers, maxRedirects = MAX_REDIRECTS)
   throw new Error("Too many redirects");
 }
 
-// تحويل مسار مطلق -> عبر بروكسي /hls
-function absolutetoProxy(u) {
+// مطلق -> عبر بروكسي /hls
+function absoluteToProxy(u) {
   try {
     const url = new URL(u);
     return `/hls${url.pathname}${url.search || ""}`;
   } catch {
+    // مسار يبدأ بـ/ بدون بروتوكول
+    if (typeof u === "string" && u.startsWith("/")) return `/hls${u}`;
     return u;
   }
 }
 
-// إعادة كتابة manifest: السطور + URI داخل التاجّات (#EXT-...).
+// إعادة كتابة الـmanifest بالكامل (سطور + URI داخل التاجّات)
 function rewriteManifest(text, baseDir) {
-  const ABS = /^(https?:)?\/\//i;
-  // عدّد أهم التاجّات التي تحمل URI:
+  const ABS_HTTP = /^(https?:)?\/\//i;
   const TAGS_WITH_URI = [
-    "EXT-X-KEY", "EXT-X-MAP", "EXT-X-MEDIA", "EXT-X-I-FRAME-STREAM-INF",
-    "EXT-X-SESSION-DATA", "EXT-X-START" // (START قد يحتوي على TIME-OFFSET فقط عادة)
+    "EXT-X-KEY",
+    "EXT-X-MAP",
+    "EXT-X-MEDIA",
+    "EXT-X-I-FRAME-STREAM-INF",
+    "EXT-X-SESSION-DATA"
   ];
   const TAGS_RE = new RegExp(`^#(?:${TAGS_WITH_URI.join("|")}):`, "i");
 
-  return text.split("\n").map((line) => {
-    const t = line.trim();
+  return text
+    .split("\n")
+    .map((line) => {
+      const t = line.trim();
 
-    // 1) التاجّات التي تحتوي URI="..."
-    if (TAGS_RE.test(t)) {
-      // استبدل كل URI="...":
-      return line.replace(/URI="([^"]+)"/gi, (_m, uri) => {
-        if (ABS.test(uri)) return `URI="${absolutetoProxy(uri)}"`;
-        // نسبي -> الصقه بمجلد الـmanifest
-        return `URI="${baseDir}${uri}"`;
-      });
-    }
+      // 1) تاجات تحتوي URI="..."
+      if (TAGS_RE.test(t)) {
+        return line.replace(/URI="([^"]+)"/gi, (_m, uri) => {
+          if (ABS_HTTP.test(uri) || uri.startsWith("/")) return `URI="${absoluteToProxy(uri)}"`;
+          return `URI="${baseDir}${uri}"`;
+        });
+      }
 
-    // 2) السطور العادية (غير التاجّات) تحمل روابط قوائم/مقاطع
-    if (!t || t.startsWith("#")) return line; // تعليقات أخرى
-    if (/^https?:\/\//i.test(t)) {
-      return absolutetoProxy(t);
-    }
-    // رابط نسبي
-    return baseDir + t;
-  }).join("\n");
+      // 2) باقي السطور: لو رابط (نسبي/مطلق)
+      if (!t || t.startsWith("#")) return line; // تعليق/أوامر
+      if (ABS_HTTP.test(t) || t.startsWith("/")) return absoluteToProxy(t);
+      return baseDir + t;
+    })
+    .join("\n");
 }
 
 // Proxy HLS عبر /hls/*
 app.get("/hls/*", async (req, res) => {
   try {
-    // أزل /hls من الطلب قبل إرساله للأصل
+    // أزل /hls قبل الإرسال للأصل
     const upstreamPathWithQuery = req.originalUrl.replace(/^\/hls/, "");
     const upstreamUrl = ORIGIN_BASE + upstreamPathWithQuery;
 
-    // مجلد الأساس داخل /hls/… لاستخدامه مع الروابط النسبية
-    const baseDir = req.originalUrl
-      .replace(/[?#].*$/, "")
-      .replace(/\/[^/]*$/, "/");
+    // مجلد أساس النسخة المعاد كتابتها تحت /hls/
+    const baseDir = req.originalUrl.replace(/[?#].*$/, "").replace(/\/[^/]*$/, "/");
 
+    // رؤوس: أجبِر الهوية (بدون gzip) ليسهل إعادة الكتابة
     const headers = {
       ...req.headers,
       host: new URL(ORIGIN_BASE).host,
-      ...(req.headers.range ? { Range: req.headers.range } : {}),
       Connection: "keep-alive",
+      "accept-encoding": "identity",
     };
+    delete headers["Accept-Encoding"];
 
     const { up } = await fetchWithRedirects(upstreamUrl, headers);
 
@@ -163,7 +171,7 @@ app.get("/hls/*", async (req, res) => {
 
     if (/\.m3u8(\?.*)?$/i.test(req.path)) {
       let data = "";
-      up.setEncoding("utf8");
+      up.setEncoding("utf8"); // مضمون غير مضغوط (identity)
       up.on("data", (c) => (data += c));
       up.on("end", () => {
         const rewritten = rewriteManifest(data, baseDir);
