@@ -31,22 +31,33 @@
 .main-full #activeCam{display:none}
 .hint{position:absolute;top:20px;right:20px;z-index:8;background:#000a;color:#fff;padding:6px 10px;border-radius:999px;font-size:12px;border:1px solid #fff2}
 .split .hint,.main-full .hint{display:none}
+
 #utilityControls,#camControls,#globalControls{position:absolute;z-index:10;display:flex;gap:8px;flex-wrap:wrap;transition:top .18s,left .18s,right .18s}
 #utilityControls{background:transparent;padding:0;border:0;border-radius:12px}
 #utilityControls.vertical{flex-direction:column} #utilityControls.horizontal{flex-direction:row}
 #utilityControls .group{display:flex;gap:6px;align-items:center}
 .divider{width:1px;height:22px;background:var(--panel-bd);border-radius:2px;margin:0 4px}
 #camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px)}
+
 #globalControls{bottom:70px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px);align-items:center;min-width:340px}
+#globalControls.hidden{display:none}
 #scrub{-webkit-appearance:none;appearance:none;width:320px;height:6px;border-radius:999px;background:#ffffff30;outline:none;margin:0 8px}
 #scrub::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid #0006;cursor:pointer}
 #timeLabel{color:#fff;font-size:12px;min-width:108px;text-align:center}
 #delayGroup{display:flex;align-items:center;gap:6px;margin-inline-start:10px}
 #delayRange{-webkit-appearance:none;appearance:none;width:140px;height:6px;border-radius:999px;background:#ffffff30;outline:none}
+
 button{-webkit-tap-highlight-color:transparent;appearance:none;border:0;outline:0;cursor:pointer;background:var(--btn-bg);color:var(--btn-txt);padding:11px 12px;font-size:12px;font-weight:800;border-radius:12px;letter-spacing:.2px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 8px 18px #000a,0 0 0 0 var(--btn-ring);transition:all .12s;opacity:.35}
 body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shadow:0 12px 26px #000c,0 0 0 6px var(--btn-ring)} button:active{background:var(--btn-bg-a);transform:translateY(1px)}
 #btnSound{min-width:auto;padding:6px 8px}
 #btnSound[data-muted="true"] .on{display:none} #btnSound[data-muted="false"] .off{display:none}
+
+#gatePlay{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,rgba(0,0,0,.55),rgba(0,0,0,.2));backdrop-filter:blur(2px)}
+#gatePlay.hidden{display:none}
+.gate-card{background:var(--panel-bg);border:1px solid var(--panel-bd);border-radius:18px;padding:18px 20px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+.gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bd);color:#fff;background:#111a;font-size:18px}
+#startBtn{min-width:160px}
+
 @media(orientation:portrait){
   #mainPreview{top:12px;right:14px;width:58vw;height:36vh;border-radius:18px}
   #globalControls{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);left:50%;transform:translateX(-50%);width:min(94vw,560px);padding:8px 10px;z-index:9999}
@@ -65,6 +76,18 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
   <div id="mainPreview" class="videoFrame" title="انقر للتكبير/التصغير" aria-label="المعاينة الرئيسية المصغّرة"></div>
   <div class="hint">انقر على المعاينة للتكبير • أو اضغط F</div>
 
+  <!-- بوابة البدء -->
+  <div id="gatePlay" role="dialog" aria-modal="true" aria-label="بدء التشغيل">
+    <div class="gate-card">
+      <div class="icon">▶</div>
+      <div>
+        <div style="color:#fff;font-weight:800;margin-bottom:6px">ابدأ التشغيل والمزامنة</div>
+        <div style="font-size:12px;color:#eaeaf0b3">لن يعمل شريط التقديم/التأخير إلا بعد الضغط على تشغيل</div>
+      </div>
+      <button id="startBtn" aria-label="ابدأ التشغيل الآن">تشغيل/بدء المزامنة</button>
+    </div>
+  </div>
+
   <!-- أدوات -->
   <div id="utilityControls" class="vertical">
     <div class="group">
@@ -79,15 +102,13 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
     </div>
   </div>
 
-  <!-- تحكّم موحّد (رجّعناه) -->
-  <div id="globalControls" role="group" aria-label="تحكم موحّد">
+  <!-- الشريط الموحّد (مخفي حتى نضغط تشغيل) -->
+  <div id="globalControls" class="hidden" role="group" aria-label="تحكم موحّد">
     <button id="gBack" title="⏪ -5s">⏪ 5s</button>
     <button id="gPlay" title="⏯">⏯</button>
     <button id="gFwd"  title="+5s ⏩">5s ⏩</button>
     <input id="scrub" type="range" min="0" max="0" value="0" step="0.01" aria-label="شريط التقدم">
     <div id="timeLabel">00:00 / 00:00</div>
-
-    <!-- تحكم التأخير الموحّد -->
     <div id="delayGroup" title="تأخير موحّد بعد المزامنة (ثواني)">
       <button id="delayMinus">-</button>
       <input id="delayRange" type="range" min="0" max="20" step="0.5" value="8">
@@ -108,8 +129,8 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
   </div>
 </div>
 
-<!-- مصادر البث -->
 <script>
+/* ===== مصادر ===== */
 window.sources = {
   main:  "https://stream.mux.com/jIy7RfNkNJqkZ1008eyc01WH9i4Nh37Q001xqZEdA50000LI.m3u8",
   cam1:  "",
@@ -125,40 +146,24 @@ window.sources = {
 <script>
 /* ===== إعداد عام ===== */
 const hasUrl = (u)=> typeof u==='string' && /^https?:\/\/.+/.test(u);
-const MIRRORS_ENABLED = false; // تعطيل المرآة نهائيًا (يمكن جعله true لاحقًا)
+const MIRRORS_ENABLED = false; // المرآة معطّلة لتجنّب التقطيع
 let performanceLightMode = true;
-function levelCapFor(){ return 360; }   // سقف افتراضي، وسيتم الخفض مؤقتًا عند الحاجة
+function levelCapFor(){ return 360; }
 
 const downlinkMbps = (navigator.connection && navigator.connection.downlink) ? navigator.connection.downlink : 2.5;
-
-// إعدادات HLS محسّنة
 const HLS_CONFIG_BASE = {
-  lowLatencyMode: false,
-  liveSyncDurationCount: 3,
-  capLevelToPlayerSize: true,
-  maxFragLookUpTolerance: 0.25,
-  maxBufferHole: 1.0,
-  maxSeekHole: 2.0,
-  nudgeOffset: 0.20,
-  nudgeMaxRetry: 6,
-  enableWorker: true,
-  progressive: false,
-  abrEwmaDefaultEstimate: Math.max(500_000,Math.min(2_500_000,downlinkMbps*500_000)),
-  abrMaxWithRealBitrate: true,
-  fragLoadingMaxRetry: 6,
-  manifestLoadingMaxRetry: 6,
-  levelLoadingMaxRetry: 5,
-  fragLoadingRetryDelay: 350,
-  manifestLoadingRetryDelay: 500,
-  levelLoadingRetryDelay: 500,
-  fragLoadingTimeOut: 10000,
-  manifestLoadingTimeOut: 8000,
-  levelLoadingTimeOut: 8000,
-  fpsDroppedMonitoringPeriod: 1000,
-  fpsDroppedMonitoringThreshold: 0.15,
+  lowLatencyMode:false, liveSyncDurationCount:3, capLevelToPlayerSize:true,
+  maxFragLookUpTolerance:0.25, maxBufferHole:1.0, maxSeekHole:2.0,
+  nudgeOffset:0.20, nudgeMaxRetry:6, enableWorker:true, progressive:false,
+  abrEwmaDefaultEstimate:Math.max(500_000,Math.min(2_500_000,downlinkMbps*500_000)),
+  abrMaxWithRealBitrate:true,
+  fragLoadingMaxRetry:6, manifestLoadingMaxRetry:6, levelLoadingMaxRetry:5,
+  fragLoadingRetryDelay:350, manifestLoadingRetryDelay:500, levelLoadingRetryDelay:500,
+  fragLoadingTimeOut:10000, manifestLoadingTimeOut:8000, levelLoadingTimeOut:8000,
+  fpsDroppedMonitoringPeriod:1000, fpsDroppedMonitoringThreshold:0.15,
   xhrSetup:(xhr)=>{ try{xhr.withCredentials=false;}catch(e){} }
 };
-const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength: 28, backBufferLength: 60 };
+const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:28, backBufferLength:60 };
 
 async function isCodecSupported(codec){
   if(navigator.mediaCapabilities?.decodingInfo){
@@ -178,10 +183,7 @@ function pickPlayableLevel(levels){
   return levels?.length?0:-1;
 }
 
-const SYNC={ main:{pdtOffset:null}, active:{pdtOffset:null} };
-let globalDelaySec = 8; // التأخير الموحّد الافتراضي
-
-/* ===== أدوات فجوات ===== */
+/* ===== فجوات ومساعدة ===== */
 function hasBufferedAround(video, pad = 0.08){
   try{ const t=video.currentTime||0, r=video.buffered; if(!r||!r.length) return false;
     for(let i=0;i<r.length;i++){ const s=r.start(i), e=r.end(i); if(t>=s-pad && t<=e+pad) return true; } }catch(e){}
@@ -198,61 +200,18 @@ async function healGapIfNeeded(video){
   try{ if('setCurrentTime' in video) await video.setCurrentTime(next).catch(()=>{}); else video.currentTime=next; await video.play().catch(()=>{}); return true; }catch(e){}
   return false;
 }
-
-/* ===== إعداد التعافي/الجودة ===== */
-function attachRecovery(hls, video, role){
-  hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{ try{
-    const idx=pickPlayableLevel(data?.levels||[]); if(idx>=0){ hls.startLevel=idx; hls.currentLevel=idx; hls.nextLevel=idx; }
-    const capHeight=levelCapFor();
-    if (isFinite(capHeight)) {
-      const levels=data.levels||[]; let capIndex=levels.findIndex(l => (l.height||0) >= capHeight);
-      if (capIndex < 0) capIndex = levels.length - 1;
-      hls.autoLevelCapping = Math.max(0, capIndex - 1);
-    }
-    if (role!=='main') { hls.config.maxBufferLength = performanceLightMode ? 10 : 14; hls.config.backBufferLength = 12; }
-    else { hls.config.maxBufferLength = performanceLightMode ? 24 : 28; hls.config.backBufferLength = performanceLightMode ? 40 : 60; }
-  }catch(e){} });
-
-  hls.on(Hls.Events.LEVEL_UPDATED,(_,data)=>{ if(data?.details?.live){ hls.latencyController?.computeLivePosition?.(); } healGapIfNeeded(video); });
-  hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{ const pdtMs=data?.frag?.programDateTime; if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; } });
-
-  let stallCount = 0;
-  function softenQuality() {
-    try{
-      const lvls = hls.levels||[]; if(!lvls.length) return;
-      const targetH = 240; let cap = lvls.findIndex(l => (l.height||0) >= targetH);
-      if (cap < 0) cap = lvls.length-1;
-      hls.autoLevelCapping = Math.max(0, cap - 1);
-    }catch(e){}
-  }
-
-  hls.on(Hls.Events.ERROR,(_,err)=>{
-    const d=err||{}; const isNet=d.type===Hls.ErrorTypes.NETWORK_ERROR;
-    const details=String(d.details||'');
-    if(isNet){
-      stallCount++; try{ hls.stopLoad(); }catch(e){} try{ hls.startLoad(0); }catch(e){}
-      if (stallCount >= 3) { softenQuality(); stallCount = 0; }
-      healGapIfNeeded(video); return;
-    }
-    if (/(BUFFER_|FRAG_PARSING|DECODE|MANIFEST_INCOMPATIBLE_CODECS)/i.test(details)){
-      stallCount++; try{ hls.immediateLevelSwitch && hls.immediateLevelSwitch(); }catch(e){}
-      try{ hls.swapAudioCodec?.(); hls.recoverMediaError?.(); }catch(e){}
-      if (stallCount >= 3) { softenQuality(); stallCount = 0; }
-      healGapIfNeeded(video); return;
-    }
-    if (d.fatal){ try{ hls.recoverMediaError?.(); }catch(e){} }
-  });
-
-  const onWaiting=()=>{ healGapIfNeeded(video); };
-  video.addEventListener('waiting', onWaiting); video.addEventListener('stalled', onWaiting);
+async function waitForSeekable(video, timeoutMs=6000){
+  const t0=performance.now();
+  return new Promise((resolve)=>{ (function loop(){
+    try{ const r=video?.seekable; if(r&&r.length) return resolve(true); }catch(e){}
+    if(performance.now()-t0>timeoutMs) return resolve(false);
+    setTimeout(loop,120);
+  })(); });
 }
 
-/* ===== مزامنة ومطاردة ناعمة للكاميرا ===== */
-function pdtAlignedTarget(mainCt){
-  const offM = SYNC.main.pdtOffset, offA = SYNC.active.pdtOffset;
-  if(offM!=null && offA!=null) return (offM + (mainCt||0)) - offA;
-  return mainCt;
-}
+/* ===== مزامنة وجودة ===== */
+const SYNC={ main:{pdtOffset:null}, active:{pdtOffset:null} };
+function pdtAlignedTarget(mainCt){ const offM=SYNC.main.pdtOffset, offA=SYNC.active.pdtOffset; if(offM!=null && offA!=null) return (offM + (mainCt||0)) - offA; return mainCt; }
 function gentlyChase(video, delta){
   const ad=Math.abs(delta);
   if(ad < 0.06){ video.playbackRate=1; return; }
@@ -260,11 +219,35 @@ function gentlyChase(video, delta){
   if(ad < 0.60){ video.playbackRate = (delta>0?0.95:1.05); return; }
   video.playbackRate = 1;
 }
+function attachRecovery(hls, video, role){
+  hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{ try{
+    const idx=pickPlayableLevel(data?.levels||[]); if(idx>=0){ hls.startLevel=idx; hls.currentLevel=idx; hls.nextLevel=idx; }
+    const capHeight=levelCapFor(); const lvls=data.levels||[]; let capIndex=lvls.findIndex(l => (l.height||0) >= capHeight); if (capIndex < 0) capIndex = lvls.length - 1; hls.autoLevelCapping=Math.max(0, capIndex - 1);
+    if (role!=='main') { hls.config.maxBufferLength = performanceLightMode ? 10 : 14; hls.config.backBufferLength = 12; }
+    else { hls.config.maxBufferLength = performanceLightMode ? 24 : 28; hls.config.backBufferLength = performanceLightMode ? 40 : 60; }
+  }catch(e){} });
+  hls.on(Hls.Events.LEVEL_UPDATED,(_,data)=>{ if(data?.details?.live){ hls.latencyController?.computeLivePosition?.(); } healGapIfNeeded(video); });
+  hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{ const pdtMs=data?.frag?.programDateTime; if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; } });
+  let stallCount=0;
+  function softenQuality(){ try{ const lvls=hls.levels||[]; if(!lvls.length) return; const targetH=240; let cap=lvls.findIndex(l=> (l.height||0)>=targetH); if(cap<0) cap=lvls.length-1; hls.autoLevelCapping=Math.max(0, cap-1);}catch(e){} }
+  hls.on(Hls.Events.ERROR,(_,err)=>{
+    const d=err||{}; const isNet=d.type===Hls.ErrorTypes.NETWORK_ERROR; const details=String(d.details||'');
+    if(isNet){ stallCount++; try{ hls.stopLoad(); }catch(e){} try{ hls.startLoad(0); }catch(e){} if(stallCount>=3){ softenQuality(); stallCount=0; } healGapIfNeeded(video); return; }
+    if(/(BUFFER_|FRAG_PARSING|DECODE|MANIFEST_INCOMPATIBLE_CODECS)/i.test(details)){ stallCount++; try{ hls.immediateLevelSwitch&&hls.immediateLevelSwitch(); }catch(e){} try{ hls.swapAudioCodec?.(); hls.recoverMediaError?.(); }catch(e){} if(stallCount>=3){ softenQuality(); stallCount=0; } healGapIfNeeded(video); return; }
+    if(d.fatal){ try{ hls.recoverMediaError?.(); }catch(e){} }
+  });
+  const onWaiting=()=>{ healGapIfNeeded(video); };
+  video.addEventListener('waiting', onWaiting); video.addEventListener('stalled', onWaiting);
+}
 
 /* ===== DOM ===== */
 const root=document.getElementById('playerContainer');
 const mainContainer=document.getElementById('mainPreview');
 const camContainer=document.getElementById('activeCam');
+const freezeLayer=document.getElementById('freezeLayer');
+const gatePlay=document.getElementById('gatePlay');
+const startBtn=document.getElementById('startBtn');
+
 const btnSplit=document.getElementById('btnSplit');
 const btnFill=document.getElementById('btnFill');
 const btnSound=document.getElementById('btnSound');
@@ -278,55 +261,17 @@ const delayRange=document.getElementById('delayRange');
 const delayLabel=document.getElementById('delayLabel');
 const delayMinus=document.getElementById('delayMinus');
 const delayPlus=document.getElementById('delayPlus');
-const freezeLayer=document.getElementById('freezeLayer');
 
 let mainPlayer, activePlayer, currentCam="cam2";
 let splitMode=0, isMainFull=false, fillMode=false, started=false, inited=false;
 let ticker=null,isScrubbing=false;
+let globalDelaySec=8;
 
-/* ===== فيديو ===== */
-function clampToSeekable(video,t){
-  const r=video.seekable; if(!r||!r.length) return t;
-  const start=r.start(r.length-1), end=r.end(r.length-1);
-  return Math.min(Math.max(t, start+0.05), end-0.05);
-}
-function getMainTime(){ if(mainPlayer?.getCurrentTime) return mainPlayer.getCurrentTime(); return Promise.resolve(mainPlayer?.currentTime||0); }
-function getMainDuration(){
-  if(mainPlayer?.getDuration) return mainPlayer.getDuration();
-  if(mainPlayer instanceof HTMLVideoElement){
-    const d=mainPlayer.duration; if(isFinite(d)) return Promise.resolve(d||0);
-    const r=mainPlayer.seekable; if(r&&r.length) return Promise.resolve(r.end(r.length-1)||0);
-  }
-  return Promise.resolve(0);
-}
-function seekMainTo(t){ if(mainPlayer?.setCurrentTime) return mainPlayer.setCurrentTime(t).catch(()=>{}); if(mainPlayer?.seekTo){ try{mainPlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.currentTime=clampToSeekable(mainPlayer,t);} return Promise.resolve(); }
-function seekActiveTo(t){ if(activePlayer?.setCurrentTime) return activePlayer.setCurrentTime(t).catch(()=>{}); if(activePlayer?.seekTo){ try{activePlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
-
-/* ===== تأخير موحَّد ===== */
+/* ===== فيديو أساسي ===== */
+function clampToSeekable(video,t){ const r=video.seekable; if(!r||!r.length) return t; const start=r.start(r.length-1), end=r.end(r.length-1); return Math.min(Math.max(t, start+0.05), end-0.05); }
 function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
 function updateDelayLabel(){ delayLabel.textContent = `Delay: ${Number(globalDelaySec).toFixed(1)}s`; }
-async function applyGlobalDelay(){
-  if(!(mainPlayer instanceof HTMLVideoElement)) return;
-  const r=mainPlayer.seekable; if(!r||!r.length) return;
-  const liveEnd = r.end(r.length-1);
-  const target = clampToSeekable(mainPlayer, liveEnd - globalDelaySec);
-  await seekMainTo(target);
-  await seekActiveTo(pdtAlignedTarget(target));
-}
-function maintainDelayLoop(){
-  if(!(mainPlayer instanceof HTMLVideoElement)) return;
-  const r=mainPlayer.seekable; if(!r||!r.length) return;
-  const liveEnd=r.end(r.length-1);
-  const current=mainPlayer.currentTime||0;
-  const diff=(liveEnd-current)-globalDelaySec; // + يعني متقدم كثير
-  if (Math.abs(diff) > 1.0) { // صحّح بقفزة صغيرة
-    seekMainTo(current + diff).then(async ()=>{
-      const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t));
-    });
-  }
-}
 
-/* ===== إنشاء فيديو وتعافيه ===== */
 function freezeFrom(video){
   try{
     const w=root.clientWidth,h=root.clientHeight; freezeLayer.width=w; freezeLayer.height=h;
@@ -340,7 +285,6 @@ function unfreeze(){ freezeLayer.style.opacity='0'; }
 function createVideo(container, url, role){
   const wrapper=document.createElement('div'); wrapper.style.position='absolute'; wrapper.style.inset='0';
   container.appendChild(wrapper);
-
   const video=document.createElement('video');
   video.autoplay=false; video.playsInline=true; video.controls=false; video.muted=true; video.preload='auto'; video.crossOrigin='anonymous';
   video.style.width='100%'; video.style.height='100%'; video.style.objectFit=((splitMode===2||fillMode)?'cover':'contain');
@@ -349,39 +293,56 @@ function createVideo(container, url, role){
   if (!hasUrl(url)) return video;
 
   if(/\.m3u8(\?|$)/i.test(url)){
-    if(video.canPlayType('application/vnd.apple.mpegURL')){
-      video.src=url;
-    }else if(window.Hls && Hls.isSupported()){
+    if(video.canPlayType('application/vnd.apple.mpegURL')){ video.src=url; }
+    else if(window.Hls && Hls.isSupported()){
       const cfg={...HLS_CONFIG}; const hls=new Hls(cfg); video.__hls=hls; hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{ const idx=pickPlayableLevel(data?.levels||[]); if(idx>=0){ hls.startLevel=idx; hls.currentLevel=idx; hls.nextLevel=idx; }
-        const capHeight=levelCapFor(); const levels=data.levels||[]; let capIndex=levels.findIndex(l => (l.height||0) >= capHeight); if (capIndex < 0) capIndex = levels.length - 1; hls.autoLevelCapping=Math.max(0, capIndex - 1); });
-      hls.loadSource(url);
-      attachRecovery(hls, video, role);
-    }else{
-      video.src=url;
-    }
+        const lvls=data.levels||[]; let capIndex=lvls.findIndex(l=>(l.height||0)>=levelCapFor()); if(capIndex<0) capIndex=lvls.length-1; hls.autoLevelCapping=Math.max(0,capIndex-1); });
+      hls.loadSource(url); attachRecovery(hls, video, role);
+    }else{ video.src=url; }
   }else if(/\.mpd(\?|$)/i.test(url) && window.dashjs){
     const p=dashjs.MediaPlayer().create(); p.initialize(video,url,false);
-  }else{
-    video.src=url;
-  }
+  }else{ video.src=url; }
 
-  video.addEventListener('loadedmetadata', ()=>{ video.play().catch(()=>{}); }, {once:true});
-  video.addEventListener('canplay', ()=>{
-    [...container.children].slice(0,-1).forEach(ch=>{ try{ const v=ch.querySelector?.('video'); v?.pause?.(); v?.__hls?.destroy?.(); ch.remove(); }catch(e){} });
-    unfreeze();
-  }, {once:true});
+  video.addEventListener('loadedmetadata', ()=>{ /* لا تشغيل قبل الضغط على زر البدء */ }, {once:true});
+  video.addEventListener('canplay', ()=>{ [...container.children].slice(0,-1).forEach(ch=>{ try{ const v=ch.querySelector?.('video'); v?.pause?.(); v?.__hls?.destroy?.(); ch.remove(); }catch(e){} }); unfreeze(); }, {once:true});
   return video;
 }
 
-/* ===== منسّق توقفات الرئيسي ===== */
+function getMainTime(){ if(mainPlayer?.getCurrentTime) return mainPlayer.getCurrentTime(); return Promise.resolve(mainPlayer?.currentTime||0); }
+function getMainDuration(){
+  if(mainPlayer?.getDuration) return mainPlayer.getDuration();
+  if(mainPlayer instanceof HTMLVideoElement){
+    const d=mainPlayer.duration; if(isFinite(d)) return Promise.resolve(d||0);
+    const r=mainPlayer.seekable; if(r&&r.length) return Promise.resolve(r.end(r.length-1)||0);
+  }
+  return Promise.resolve(0);
+}
+function seekMainTo(t){ if(mainPlayer?.setCurrentTime) return mainPlayer.setCurrentTime(t).catch(()=>{}); if(mainPlayer?.seekTo){ try{mainPlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.currentTime=clampToSeekable(mainPlayer,t);} return Promise.resolve(); }
+function seekActiveTo(t){ if(activePlayer?.setCurrentTime) return activePlayer.setCurrentTime(t).catch(()=>{}); if(activePlayer?.seekTo){ try{activePlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
+
+async function applyGlobalDelay(){
+  if(!(mainPlayer instanceof HTMLVideoElement)) return;
+  const r=mainPlayer.seekable; if(!r||!r.length) return;
+  const liveEnd = r.end(r.length-1);
+  const target = clampToSeekable(mainPlayer, liveEnd - globalDelaySec);
+  await seekMainTo(target);
+  await seekActiveTo(pdtAlignedTarget(target));
+}
+function maintainDelayLoop(){
+  if(!(mainPlayer instanceof HTMLVideoElement)) return;
+  const r=mainPlayer.seekable; if(!r||!r.length) return;
+  const liveEnd=r.end(r.length-1);
+  const current=mainPlayer.currentTime||0;
+  const diff=(liveEnd-current)-globalDelaySec;
+  if (Math.abs(diff) > 1.0) {
+    seekMainTo(current + diff).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
+  }
+}
+
 function attachMainStallCoordinator(mainVideo, camVideo){
   const onStall = ()=>{ freezeFrom(mainVideo); try{ camVideo?.pause?.(); }catch(e){} };
-  const onResume = async ()=>{
-    unfreeze();
-    try{ await camVideo?.play?.(); }catch(e){}
-    try{ const mt = await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); }catch(e){}
-  };
+  const onResume = async ()=>{ unfreeze(); try{ await camVideo?.play?.(); }catch(e){} try{ const mt = await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); }catch(e){} };
   ['waiting','stalled','suspend','emptied','seeking'].forEach(ev=> mainVideo.addEventListener(ev,onStall));
   ['playing','canplay','canplaythrough','seeked'].forEach(ev=> mainVideo.addEventListener(ev,onResume));
 }
@@ -390,7 +351,8 @@ function attachMainStallCoordinator(mainVideo, camVideo){
 function positionUtilityDock(){
   const utilityControls=document.getElementById('utilityControls');
   if(root.classList.contains('main-full')){ utilityControls.style.display='none'; globalControls.style.display='none'; return; }
-  utilityControls.style.display='flex'; globalControls.style.display='flex';
+  utilityControls.style.display='flex';
+  globalControls.style.display = started ? 'flex' : 'none';
   const m=10, r=mainContainer.getBoundingClientRect();
   if(splitMode===0){
     utilityControls.classList.add('vertical'); utilityControls.classList.remove('horizontal');
@@ -407,7 +369,6 @@ function positionUtilityDock(){
 }
 window.addEventListener('resize', positionUtilityDock);
 window.addEventListener('orientationchange', ()=>setTimeout(positionUtilityDock,120));
-
 function applySplitClasses(){
   root.classList.toggle('split',splitMode!==0);
   root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode)));
@@ -423,7 +384,7 @@ function initPlayers(){
 function initPlayersOnce(){
   if(inited) return; inited=true;
   initPlayers();
-  // إظهار فقط الكاميرات التي لها رابط
+  // إظهار فقط الكاميرات المتاحة
   document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
     const id=btn.getAttribute('data-cam');
     if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
@@ -435,12 +396,21 @@ async function playEntity(ent, muted=true){ try{ ent.muted=!!muted; await ent.pl
 async function startPlayback(){
   if(started) return;
   started=true;
+  gatePlay.classList.add('hidden');
+  globalControls.classList.remove('hidden');
+
+  // تشغيل فعلي بعد تفاعل المستخدم
   await playEntity(mainPlayer,true);
   await playEntity(activePlayer,true);
+
+  // انتظر جاهزية الرئيسي ثم طبّق التأخير والمزامنة
+  await waitForSeekable(mainContainer.querySelector('video'));
+  await applyGlobalDelay();
+  const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt));
+
   attachMainStallCoordinator(mainContainer.querySelector('video'), camContainer.querySelector('video'));
-  // طبّق التأخير الموحّد أولًا
-  setTimeout(()=>applyGlobalDelay().then(()=>syncCams()), 200);
   startTimeTicker();
+  positionUtilityDock();
 }
 
 function startTimeTicker(){
@@ -452,16 +422,14 @@ function startTimeTicker(){
     if(d&&isFinite(d)) scrub.max=d;
     scrub.value=ct||0; timeLabel.textContent=`${fmt(ct)} / ${fmt(d||0)}`;
     maintainDelayLoop();
-    // مطاردة ناعمة للكاميرا
     const target=pdtAlignedTarget(ct); const delta=(activePlayer?.currentTime||0) - target;
     gentlyChase(activePlayer, delta);
   }, 250);
 }
 
 async function syncCams(){ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); }
-
 async function toggleSound(){
-  if(!started) await startPlayback();
+  if(!started) return;
   if(/vimeo\.com/i.test(sources.main) && mainPlayer?.getVolume){ try{ const v=await mainPlayer.getVolume(); if(v>0){ await mainPlayer.setVolume(0);} else { await mainPlayer.setVolume(1); await mainPlayer.play().catch(()=>{});} }catch(e){} btnSound.dataset.muted='false'; return; }
   if(/youtube\.com|youtu\.be/i.test(sources.main) && mainPlayer?.isMuted){ try{ if(mainPlayer.isMuted()) mainPlayer.unMute(); else mainPlayer.mute(); mainPlayer.playVideo?.(); }catch(e){} btnSound.dataset.muted=String(!!mainPlayer.isMuted()); return; }
   if(mainPlayer instanceof HTMLVideoElement){ try{ if(mainPlayer.muted){ mainPlayer.muted=false; mainPlayer.volume=1; await mainPlayer.play().catch(()=>{});} else { mainPlayer.muted=true; } }catch(e){} btnSound.dataset.muted=String(!!mainPlayer.muted); }
@@ -473,51 +441,61 @@ function switchCam(cam, btn){
   const currentVid = camContainer.querySelector('video') || mainContainer.querySelector('video');
   if(currentVid) freezeFrom(currentVid);
 
-  // إنشاء جديد مع خطة سقوط إن لم يشتغل خلال 3 ثوانٍ
   let newcomer=createVideo(camContainer, sources[cam], 'active');
   let promoted=false;
-  const promote=async()=>{ if(promoted) return; promoted=true; activePlayer=newcomer; await playEntity(activePlayer,true);
-    const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); attachMainStallCoordinator(mainContainer.querySelector('video'), activePlayer); };
+  const promote=async()=>{ if(promoted) return; promoted=true; activePlayer=newcomer; if(started){ await playEntity(activePlayer,true); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); attachMainStallCoordinator(mainContainer.querySelector('video'), activePlayer); } };
   if(newcomer instanceof HTMLVideoElement){
     newcomer.addEventListener('canplay',promote,{once:true});
-    newcomer.play().catch(()=>{});
+    if(started) newcomer.play().catch(()=>{});
     setTimeout(()=>{
-      if(!promoted){ // سقوط: أعد التحميل بقوة
-        try{ newcomer.__hls?.recoverMediaError?.(); newcomer.load?.(); newcomer.play?.(); }catch(e){}
-        setTimeout(()=>{ if(!promoted) promote(); }, 1000);
+      if(!promoted){
+        try{ newcomer.__hls?.recoverMediaError?.(); newcomer.load?.(); if(started) newcomer.play?.(); }catch(e){}
+        setTimeout(()=>{ if(!promoted) promote(); }, 800);
       }
     }, 3000);
   } else { promote(); }
 }
 
 /* ===== أحداث ===== */
+document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; switchCam(b.getAttribute('data-cam'), b); });
 btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } applySplitClasses(); });
 btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode;  applySplitClasses(); });
-btnSound.addEventListener('click', toggleSound);
-mainContainer.addEventListener('click', ()=>{ if(splitMode===0){ isMainFull=!isMainFull; root.classList.toggle('main-full',isMainFull); positionUtilityDock(); }});
-gBack.addEventListener('click', async()=>{ const t=await getMainTime(); await seekMainTo(t-5); await seekActiveTo(pdtAlignedTarget(t-5)); });
-gFwd .addEventListener('click', async()=>{ const t=await getMainTime(); await seekMainTo(t+5); await seekActiveTo(pdtAlignedTarget(t+5)); });
-gPlay.addEventListener('click', async()=>{
-  if(mainPlayer instanceof HTMLVideoElement){ if(mainPlayer.paused){ await mainPlayer.play().catch(()=>{});} else mainPlayer.pause(); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); }
-});
-scrub.addEventListener('input', ()=>{ isScrubbing=true; });
-scrub.addEventListener('change', async()=>{ const nt=parseFloat(scrub.value)||0; await seekMainTo(nt); await seekActiveTo(pdtAlignedTarget(nt)); isScrubbing=false; });
-delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; updateDelayLabel(); });
-delayRange.addEventListener('change', applyGlobalDelay);
-delayMinus.addEventListener('click', ()=>{ delayRange.value = Math.max(0, (parseFloat(delayRange.value)||0)-0.5); delayRange.dispatchEvent(new Event('change')); updateDelayLabel(); });
-delayPlus .addEventListener('click', ()=>{ delayRange.value = Math.min(20,(parseFloat(delayRange.value)||0)+0.5); delayRange.dispatchEvent(new Event('change')); updateDelayLabel(); });
-document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; switchCam(b.getAttribute('data-cam'), b); });
+btnSound.addEventListener('click', ()=>toggleSound());
 
+gBack.addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t-5); await seekActiveTo(pdtAlignedTarget(t-5)); });
+gFwd .addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t+5); await seekActiveTo(pdtAlignedTarget(t+5)); });
+gPlay.addEventListener('click', async()=>{ if(!started) return; if(mainPlayer instanceof HTMLVideoElement){ if(mainPlayer.paused){ await mainPlayer.play().catch(()=>{});} else mainPlayer.pause(); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); }});
+scrub.addEventListener('input', ()=>{ if(!started) return; isScrubbing=true; });
+scrub.addEventListener('change', async()=>{ if(!started) return; const nt=parseFloat(scrub.value)||0; await seekMainTo(nt); await seekActiveTo(pdtAlignedTarget(nt)); isScrubbing=false; });
+
+delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; updateDelayLabel(); });
+delayRange.addEventListener('change', ()=>{ if(started) applyGlobalDelay(); });
+delayMinus.addEventListener('click', ()=>{ delayRange.value = Math.max(0, (parseFloat(delayRange.value)||0)-0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
+delayPlus .addEventListener('click', ()=>{ delayRange.value = Math.min(20,(parseFloat(delayRange.value)||0)+0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
+
+startBtn.addEventListener('click', startPlayback);
 document.addEventListener('keydown',(e)=>{
   if(e.key===' '||e.key==='Enter'){ e.preventDefault(); startPlayback(); }
   if(e.key==='S'||e.key==='s'){ splitMode=(splitMode+1)%3; applySplitClasses(); }
   if(e.key==='F'||e.key==='f'){ if(splitMode===0){ isMainFull=!isMainFull; root.classList.toggle('main-full',isMainFull); positionUtilityDock(); } }
-  if(e.key==='M'||e.key==='m'){ toggleSound(); }
 });
 
-/* ===== بدء ===== */
+function initPlayersOnce(){
+  if(inited) return; inited=true;
+  // إنشاء العناصر فقط (بدون تشغيل)
+  if(!mainPlayer){ mainPlayer=createVideo(mainContainer, sources.main, 'main'); }
+  if(!activePlayer){ activePlayer=createVideo(camContainer, sources["cam2"], 'active'); }
+  // إظهار فقط الكاميرات المتاحة
+  document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
+    const id=btn.getAttribute('data-cam');
+    if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
+  });
+  updateDelayLabel();
+  positionUtilityDock();
+}
+
 window.onYouTubeIframeAPIReady=()=>{ initPlayersOnce(); };
-window.addEventListener('DOMContentLoaded',  ()=>{ initPlayersOnce(); updateDelayLabel(); });
+window.addEventListener('DOMContentLoaded',  ()=>{ initPlayersOnce(); });
 (function autoUi(){ let t=null; const wake=()=>{ document.body.classList.add('ui-awake'); clearTimeout(t); t=setTimeout(()=>document.body.classList.remove('ui-awake'), 1800); }; ['mousemove','touchstart','touchmove','keydown','click'].forEach(ev=>window.addEventListener(ev,wake,{passive:true})); wake();})();
 </script>
 </body>
