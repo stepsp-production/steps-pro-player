@@ -21,13 +21,13 @@ const DEBUG = String(process.env.DEBUG_HLS || "false") === "true";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✔️ أنشئ التطبيق أولاً
+// أنشئ التطبيق أولاً
 const app = express();
 app.disable("x-powered-by");
 app.use(morgan("tiny"));
 app.use(cors());
 
-// ===== بروكسي HLS أولاً (قبل أي static) =====
+// ===== أدوات البروكسي =====
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const httpsAgent = new https.Agent({
   keepAlive: true,
@@ -40,11 +40,11 @@ function upstreamHeaders(req) {
     Host: new URL(ORIGIN_BASE).host,
     Connection: "keep-alive",
     Accept: "*/*",
-    "Accept-Encoding": "identity", // نطلبه غير مضغوط
+    "Accept-Encoding": "identity", // غير مضغوط لتسهيل إعادة الكتابة
     "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
   };
   if (req.headers.range) h.Range = req.headers.range;
-  return h; // لا نمرّر Origin/Referer
+  return h; // لا نمرر Origin/Referer
 }
 
 function requestOnce(urlStr, headers) {
@@ -60,7 +60,6 @@ function requestOnce(urlStr, headers) {
   });
 }
 
-// تتبّع تحويلات 3xx
 async function fetchWithRedirects(urlStr, headers, max = MAX_REDIRECTS) {
   let current = urlStr;
   for (let i = 0; i <= max; i++) {
@@ -77,10 +76,9 @@ async function fetchWithRedirects(urlStr, headers, max = MAX_REDIRECTS) {
   throw new Error("Too many redirects");
 }
 
-// حوّل أي مرجع (نسبي/مطلق) إلى /hls/* بدون تكرار /hls
 function refToProxy(ref, baseAbsUrl) {
   try {
-    const abs = new URL(ref, baseAbsUrl);       // يحل النسبي أيضًا
+    const abs = new URL(ref, baseAbsUrl);        // يحل النسبي أيضًا
     let p = abs.pathname.replace(/^\/hls/i, ""); // لا نضاعف /hls
     return `/hls${p}${abs.search || ""}`;
   } catch {
@@ -92,7 +90,6 @@ function refToProxy(ref, baseAbsUrl) {
   }
 }
 
-// إعادة كتابة المانيفست (يشمل URI داخل الوسوم)
 function rewriteManifest(text, baseAbsUrl) {
   const TAGS = [
     "EXT-X-KEY",
@@ -117,11 +114,9 @@ function rewriteManifest(text, baseAbsUrl) {
     .join("\n");
 }
 
-// راوتر خاص بالبث
-const hlsRouter = express.Router();
-
-// MIME + Cache لكل أنواع HLS
-hlsRouter.use((req, res, next) => {
+// ===== بروكسي /hls قبل أي static =====
+app.use("/hls", (req, res, next) => {
+  // MIME + Cache
   if (/\.m3u8$/i.test(req.path)) {
     res.type("application/vnd.apple.mpegurl");
     res.setHeader("Cache-Control", "no-store, must-revalidate");
@@ -141,13 +136,12 @@ hlsRouter.use((req, res, next) => {
   next();
 });
 
-hlsRouter.get("/*", async (req, res) => {
+app.get("/hls/*", async (req, res) => {
   try {
-    const upstreamUrl = ORIGIN_BASE + req.originalUrl; // يمر كما هو إلى الأصل
+    const upstreamUrl = ORIGIN_BASE + req.originalUrl; // مرّر كما هو
     const { up, finalUrl } = await fetchWithRedirects(upstreamUrl, upstreamHeaders(req));
 
     const isManifest = /\.m3u8(\?.*)?$/i.test(req.originalUrl);
-
     if (!isManifest) {
       if (up.headers["content-type"]) res.set("Content-Type", up.headers["content-type"]);
       if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
@@ -155,7 +149,6 @@ hlsRouter.get("/*", async (req, res) => {
     }
 
     if ((up.statusCode || 0) >= 400) {
-      // لا نسمح للواجهة بإرجاع HTML داخل /hls
       res.status(up.statusCode).type("text").end(`Upstream error ${up.statusCode}`);
       up.resume();
       return;
@@ -191,10 +184,7 @@ hlsRouter.get("/*", async (req, res) => {
   }
 });
 
-// ✅ اربط راوتر البث قبل أي static
-app.use("/hls", hlsRouter);
-
-// ===== بقية التطبيق (الواجهة) =====
+// ===== الواجهة والصفحات =====
 app.use(
   compression({
     filter: (req, res) =>
@@ -202,14 +192,11 @@ app.use(
   })
 );
 
-// ملفات الواجهة
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/player", (req, res) => {
   const src = req.query.src || "/hls/live/playlist.m3u8";
-  res
-    .type("html")
-    .send(`<!doctype html>
+  res.type("html").send(`<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>HLS Player</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
