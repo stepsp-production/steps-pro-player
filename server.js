@@ -22,6 +22,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
+// لا نضغط الميديا
 app.use(
   compression({
     filter: (req, res) => {
@@ -50,6 +51,7 @@ app.use((req, res, next) => {
   next();
 });
 
+// Keep-Alive
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
