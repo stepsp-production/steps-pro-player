@@ -22,7 +22,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط الميديا
 app.use(
   compression({
     filter: (req, res) => {
@@ -51,7 +50,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Keep-Alive للوكلاء
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
@@ -109,7 +107,6 @@ function rewriteManifest(text, basePath) {
     .join("\n");
 }
 
-// Proxy HLS
 app.get("/hls/*", async (req, res) => {
   try {
     const upstreamUrl = ORIGIN_BASE + req.originalUrl;
@@ -151,9 +148,7 @@ app.get("/hls/*", async (req, res) => {
 
     res.status(up.statusCode || 200);
     res.on("close", () => {
-      try {
-        up.destroy();
-      } catch {}
+      try { up.destroy(); } catch {}
     });
     up.pipe(res);
   } catch (e) {
