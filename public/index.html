@@ -37,7 +37,6 @@
 #utilityControls.vertical{flex-direction:column} #utilityControls.horizontal{flex-direction:row}
 #utilityControls .group{display:flex;gap:6px;align-items:center}
 .divider{width:1px;height:22px;background:var(--panel-bd);border-radius:2px;margin:0 4px}
-#camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px)}
 
 #globalControls{bottom:70px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px);align-items:center;min-width:340px}
 #globalControls.hidden{display:none}
@@ -57,6 +56,8 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
 .gate-card{background:var(--panel-bg);border:1px solid var(--panel-bd);border-radius:18px;padding:18px 20px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 40px rgba(0,0,0,.45)}
 .gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bد);color:#fff;background:#111a;font-size:18px}
 #startBtn{min-width:160px}
+
+#camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);backdrop-filter:blur(8px)}
 
 @media(orientation:portrait){
   #mainPreview{top:12px;right:14px;width:58vw;height:36vh;border-radius:18px}
@@ -102,14 +103,14 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
     </div>
   </div>
 
-  <!-- الشريط (يظهر بعد البدء) -->
+  <!-- الشريط -->
   <div id="globalControls" class="hidden" role="group" aria-label="تحكم موحّد">
     <button id="gBack" title="⏪ -5s">⏪ 5s</button>
     <button id="gPlay" title="⏯">⏯</button>
     <button id="gFwd"  title="+5s ⏩">5s ⏩</button>
     <input id="scrub" type="range" min="0" max="0" value="0" step="0.01" aria-label="شريط التقدم">
     <div id="timeLabel">00:00 / 00:00</div>
-    <div id="delayGroup" title="تأخير موحّد بعد المزامنة (ثواني)">
+    <div id="delayGroup" title="تأخير موحّد داخل نافذة البث (ثواني)">
       <button id="delayMinus">-</button>
       <input id="delayRange" type="range" min="0" max="20" step="0.5" value="5">
       <button id="delayPlus">+</button>
@@ -174,36 +175,40 @@ const HLS_CONFIG_BASE = {
   fpsDroppedMonitoringThreshold:0.15,
   xhrSetup:(xhr)=>{ try{xhr.withCredentials=false;}catch(e){} }
 };
-// بافر واقعي للبث المباشر
 const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:18, backBufferLength:40 };
 
-/* ——— دوال مساعدة لاختيار AVC فقط ——— */
+/* ——— إجبار AVC فقط ——— */
 function isAvc(l){ return /avc1/i.test(l?.codecs || l?.codecsVideo || ""); }
 function isHevc(l){ return /(hvc1|hev1)/i.test(l?.codecs || l?.codecsVideo || ""); }
 function pickBestAvc(levels, capHeight=360){
   if(!levels?.length) return -1;
-  const avcIdx = levels
-    .map((l,i)=>({i,h:l.height||0,avc:isAvc(l)}))
-    .filter(x=>x.avc);
-  if(!avcIdx.length) return 0; // لا يوجد AVC → خذه كما هو
-  // اختر أقرب <= capHeight، وإن لم يوجد اختر أدنى AVC
-  let candidates = avcIdx.filter(x=>x.h && x.h<=capHeight);
-  if(!candidates.length) candidates = avcIdx;
-  // الأقل ارتفاعًا لأقل تحميل
+  const avc = levels.map((l,i)=>({i,h:l.height||0,avc:isAvc(l)})).filter(x=>x.avc);
+  if(!avc.length) return 0;
+  let candidates = avc.filter(x=>x.h && x.h<=capHeight);
+  if(!candidates.length) candidates = avc;
   candidates.sort((a,b)=>a.h-b.h);
   return candidates[candidates.length-1].i;
 }
 function highestAvcIndex(levels){
-  let max=-1;
-  (levels||[]).forEach((l,i)=>{ if(isAvc(l)) max=i; });
+  let max=-1; (levels||[]).forEach((l,i)=>{ if(isAvc(l)) max=i; });
   return max>=0 ? max : (levels?.length? levels.length-1 : -1);
 }
 
 /* ========= فجوات وسلامة ========= */
+function getSeekableRange(video){
+  try{
+    const r=video.seekable; if(!r||!r.length) return null;
+    const start=r.start(r.length-1), end=r.end(r.length-1);
+    return {start,end,size:Math.max(0,end-start)};
+  }catch(e){ return null; }
+}
 function clampToSeekable(video,t){
-  const r=video.seekable; if(!r||!r.length) return t;
-  const start=r.start(r.length-1), end=r.end(r.length-1);
-  return Math.min(Math.max(t, start+0.05), end-0.05);
+  const m=getSeekableRange(video);
+  if(!m) return t;
+  const safeStart = m.start + 0.02;
+  const safeEnd   = m.end   - 0.02;
+  if(safeEnd <= safeStart) return m.start; // نافذة صغيرة جدًا — ابقَ عند البداية الآمنة
+  return Math.min(Math.max(t, safeStart), safeEnd);
 }
 function findNextBufferedStart(video){
   try{ const t=video.currentTime||0, r=video.buffered; if(!r||!r.length) return null;
@@ -221,10 +226,16 @@ async function healGapIfNeeded(video){
   }catch(e){}
   return false;
 }
-async function waitForSeekable(video, timeoutMs=6000){
+async function waitForSeekable(video, timeoutMs=8000){
   const t0=performance.now();
   return new Promise((resolve)=>{ (function loop(){
-    try{ const r=video?.seekable; if(r&&r.length) return resolve(true); }catch(e){}
+    try{
+      const r=video?.seekable;
+      if(r&&r.length){
+        const size = r.end(r.length-1)-r.start(r.length-1);
+        if(size>0.25) return resolve(true);
+      }
+    }catch(e){}
     if(performance.now()-t0>timeoutMs) return resolve(false);
     setTimeout(loop,120);
   })(); });
@@ -234,27 +245,20 @@ async function waitForSeekable(video, timeoutMs=6000){
 const SYNC={ main:{pdtOffset:null}, active:{pdtOffset:null} };
 function pdtAlignedTarget(mainCt){ const offM=SYNC.main.pdtOffset, offA=SYNC.active.pdtOffset; if(offM!=null && offA!=null) return (offM + (mainCt||0)) - offA; return mainCt; }
 
-function getSeekableMetrics(video){
-  try{
-    const r=video.seekable; if(!r||!r.length) return null;
-    const start=r.start(r.length-1), end=r.end(r.length-1);
-    const size=Math.max(0,end-start);
-    const isSlidingLive = (!isFinite(video.duration)) || (start>0.1);
-    return {start,end,size,isSlidingLive};
-  }catch(e){ return null; }
-}
 let globalDelaySec = 5;
 let appliedDelaySec = 5;
-const SAFETY_MARGIN = 1.2;
+const MIN_DELAY = 0.15;
+const SAFETY_MARGIN = 0.35;
 function computeSafeDelay(mainVideo){
-  const m=getSeekableMetrics(mainVideo);
-  if(!m){ appliedDelaySec = globalDelaySec; return; }
-  if(m.isSlidingLive){
-    const maxDelay = Math.max(0.6, m.size - SAFETY_MARGIN);
-    appliedDelaySec = Math.min(globalDelaySec, maxDelay);
-    appliedDelaySec = Math.max(0.5, appliedDelaySec);
-  }else{
-    appliedDelaySec = globalDelaySec;
+  const m=getSeekableRange(mainVideo);
+  if(!m){ appliedDelaySec = Math.max(MIN_DELAY, Math.min(globalDelaySec, 2)); return; }
+  // أكبر تأخير مسموح داخل النافذة مع هامش أمان
+  const maxDelay = Math.max(MIN_DELAY, m.size - SAFETY_MARGIN);
+  // لو النافذة أصغر من (MIN_DELAY + SAFETY)، استخدم جزءًا صغيرًا داخلها
+  if(m.size < (MIN_DELAY + SAFETY_MARGIN)) {
+    appliedDelaySec = Math.max(0.05, m.size * 0.5);
+  } else {
+    appliedDelaySec = Math.max(MIN_DELAY, Math.min(globalDelaySec, maxDelay));
   }
 }
 function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
@@ -284,7 +288,7 @@ let mainPlayer, activePlayer, currentCam="cam2";
 let splitMode=0, isMainFull=false, fillMode=false, started=false, inited=false;
 let ticker=null,isScrubbing=false;
 
-/* ========= إنشاء فيديو + إجبار AVC ========= */
+/* ========= HLS مع إجبار AVC ========= */
 function attachHlsWithAvc(video, url, role){
   const hls = new Hls({...HLS_CONFIG});
   video.__hls = hls;
@@ -294,50 +298,36 @@ function attachHlsWithAvc(video, url, role){
   hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{
     try{
       const levels=data?.levels||[];
-      // اختر أفضل مستوى AVC كبداية
       const startIdx = pickBestAvc(levels, 360);
       const maxAvcIdx = highestAvcIndex(levels);
-
-      if(startIdx >= 0){
-        hls.startLevel = startIdx;
-        hls.currentLevel = startIdx;
-        hls.nextLevel = startIdx;
-      }
-      if(maxAvcIdx >= 0){
-        hls.autoLevelCapping = maxAvcIdx; // لا تصعد إلى HEVC
-      }
+      if(startIdx >= 0){ hls.startLevel = startIdx; hls.currentLevel = startIdx; hls.nextLevel = startIdx; }
+      if(maxAvcIdx >= 0){ hls.autoLevelCapping = maxAvcIdx; }
     }catch(e){}
   });
 
-  // منع الانتقال إلى HEVC أثناء التشغيل
   hls.on(Hls.Events.LEVEL_SWITCHING,(_,data)=>{
     try{
       const l = hls.levels?.[data.level];
       if(l && isHevc(l)){
-        // ابحث عن أقرب مستوى AVC بنفس الارتفاع تقريبًا
         const lvls = hls.levels||[];
         const avcCandidates = lvls.map((x,i)=>({i,h:x.height||0,avc:isAvc(x)})).filter(x=>x.avc);
         if(avcCandidates.length){
-          // اختر أعلى AVC لا يتجاوز 480
-          let best = avcCandidates.reduce((a,b)=> b.h<=480 && b.h>a.h ? b : a, {i:avcCandidates[0].i,h:avcCandidates[0].h});
+          let best = avcCandidates.reduce((a,b)=> b.h<=480 && b.h>a.h ? b : a, avcCandidates[0]);
           hls.nextLevel = best.i;
         }
       }
     }catch(e){}
   });
 
-  // تتبع مزامنة PDT
   hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{
     const pdtMs=data?.frag?.programDateTime;
     if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; }
   });
 
-  // تعافي أخطاء بدون حلقة لا نهائية
   hls.on(Hls.Events.ERROR,(_,err)=>{
     const t=err.type, det=String(err.details||'');
     if(t===Hls.ErrorTypes.NETWORK_ERROR){ try{ hls.stopLoad(); hls.startLoad(); }catch(e){} healGapIfNeeded(video); return; }
     if(t===Hls.ErrorTypes.MEDIA_ERROR){
-      // لو كان بسبب HEVC، قفز لِـ AVC فوريًا
       try{
         const lvls=hls.levels||[]; const anyAvc = lvls.findIndex(isAvc);
         if(anyAvc>=0){ hls.nextLevel = anyAvc; hls.immediateLevelSwitch?.(); }
@@ -365,7 +355,6 @@ function createVideo(container, url, role){
       if(window.Hls && Hls.isSupported()){
         attachHlsWithAvc(video, url, role);
       }else if(video.canPlayType('application/vnd.apple.mpegURL')){
-        // تشغيل أصلي (Safari) — عادة يدعم HEVC فلا مشكلة
         video.src=url;
       }else{
         video.src=url;
@@ -431,15 +420,14 @@ function seekMainTo(t){ if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.c
 function seekActiveTo(t){ if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
 async function syncCams(){ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); }
 
-function updateDelayUi(){
-  document.getElementById('delayLabel').textContent =
-    `Delay: ${globalDelaySec.toFixed(1)}s`;
-}
+function updateDelayUi(){ delayLabel.textContent = `Delay: ${globalDelaySec.toFixed(1)}s`; }
 
 async function applyGlobalDelay(){
   const mv = mainContainer.querySelector('video'); if(!mv) return;
   computeSafeDelay(mv);
-  const m=getSeekableMetrics(mv); if(!m) return;
+  const m=getSeekableRange(mv); if(!m) return;
+  // إذا كانت النافذة صغيرة جدًا، لا نطبّق التأخير الآن
+  if(m.size < (MIN_DELAY + SAFETY_MARGIN + 0.05)) return;
   const target = clampToSeekable(mv, m.end - appliedDelaySec);
   await seekMainTo(target);
   await seekActiveTo(pdtAlignedTarget(target));
@@ -447,12 +435,15 @@ async function applyGlobalDelay(){
 
 function maintainDelayLoop(){
   const mv = mainContainer.querySelector('video'); if(!mv || mv.paused) return;
-  const m=getSeekableMetrics(mv); if(!m) return;
+  const m=getSeekableRange(mv); if(!m) return;
   computeSafeDelay(mv);
+  // لا نحاول التصحيح لو النافذة أقل من 0.6s تقريبًا
+  if(m.size < 0.6) return;
   const current=mv.currentTime||0;
   const diff=(m.end-current)-appliedDelaySec;
   if (Math.abs(diff) > 0.7 && !isScrubbing) {
-    seekMainTo(current + diff).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
+    const target = clampToSeekable(mv, current + diff);
+    seekMainTo(target).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
   }
 }
 
@@ -485,6 +476,7 @@ async function startPlayback(){
   await playEntity(mainPlayer,true);
   await playEntity(activePlayer,true);
 
+  // انتظر نافذة قابلة للـseek ثم طبّق تأخير آمن فقط إن كان ممكنًا
   await waitForSeekable(mainContainer.querySelector('video'));
   await applyGlobalDelay();
   await syncCams();
@@ -496,14 +488,12 @@ async function startPlayback(){
 /* ========= تحكمات ========= */
 document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
   currentCam=id;
-  const old = camContainer.querySelector('video') || mainContainer.querySelector('video');
-  try{ if(old) { old.pause(); } }catch(e){}
   const newcomer=createVideo(camContainer, sources[id], 'active');
   newcomer.addEventListener('canplay', async ()=>{ activePlayer=newcomer; if(started){ await playEntity(activePlayer,true); await syncCams(); } }, {once:true});
 });
 
-btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } root.classList.toggle('split',splitMode!==0); root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); });
-btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode; root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); });
+btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } root.classList.toggle('split',splitMode!==0); root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); positionUtilityDock(); });
+btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode; root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); positionUtilityDock(); });
 btnSound.addEventListener('click', ()=>{
   if(!started) return;
   if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.muted = !mainPlayer.muted; if(!mainPlayer.muted) mainPlayer.play().catch(()=>{}); btnSound.dataset.muted=String(!!mainPlayer.muted); }
@@ -514,6 +504,7 @@ gPlay.addEventListener('click', async()=>{ if(!started) return; if(mainPlayer.pa
 scrub.addEventListener('input', ()=>{ if(!started) return; isScrubbing=true; });
 scrub.addEventListener('change', async()=>{ if(!started) return; const nt=parseFloat(scrub.value)||0; await seekMainTo(nt); await seekActiveTo(pdtAlignedTarget(nt)); isScrubbing=false; });
 
+function updateDelayUi(){ delayLabel.textContent = `Delay: ${globalDelaySec.toFixed(1)}s`; }
 delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; updateDelayUi(); });
 delayRange.addEventListener('change', ()=>{ if(started) applyGlobalDelay(); });
 delayMinus.addEventListener('click', ()=>{ delayRange.value = Math.max(0, (parseFloat(delayRange.value)||0)-0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
