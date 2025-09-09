@@ -7,7 +7,6 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { URL } from "url";
-import { pipeline } from "stream";
 
 // ======= CONFIG =======
 const ORIGIN_BASE = process.env.ORIGIN_BASE || "http://46.152.116.98";
@@ -22,68 +21,56 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(morgan("tiny"));
+
+// لا نضغط ملفات الفيديو (m3u8/m4s/ts) — نضغط باقي الملفات فقط
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (/\.(m3u8|ts|m4s)$/i.test(req.path)) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
+
 app.use(cors());
 
-// ❗ تعطيل الضغط على وسائط الفيديو/الصوت/الـmanifests لتفادي تجزئة/تشويش البث
-const shouldCompress = (req, res) => {
-  const p = req.path.toLowerCase();
-  if (p.endsWith(".m3u8") || p.endsWith(".mpd") || p.endsWith(".ts") || p.endsWith(".m4s") || p.endsWith(".mp4")) {
-    return false;
-  }
-  return compression.filter(req, res);
-};
-app.use(compression({ filter: shouldCompress }));
+// ملفات الواجهة
+app.use(express.static(path.join(__dirname, "public")));
 
-// تقديم الواجهة
-app.use(express.static(path.join(__dirname, "public"), {
-  setHeaders(res, filePath) {
-    const low = filePath.toLowerCase();
-    // لا كاش لـ m3u8 (لأنها متغيرة) — لكن اسمح بكاش قصير للSegments
-    if (low.endsWith(".m3u8")) {
-      res.setHeader("Cache-Control", "no-store, must-revalidate");
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-    } else if (low.endsWith(".ts")) {
-      res.setHeader("Cache-Control", "public, max-age=30, immutable");
-      res.setHeader("Content-Type", "video/mp2t");
-    } else if (low.endsWith(".m4s")) {
-      res.setHeader("Cache-Control", "public, max-age=30, immutable");
-      // CMAF segments
-      res.setHeader("Content-Type", "video/iso.segment");
-    }
-  }
-}));
-
-// عناوين افتراضية
+// ترويسات عامة + أنواع المحتوى
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "*");
+  if (/\.(m3u8)$/i.test(req.path)) {
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    res.setHeader("Cache-Control", "no-store, must-revalidate");
+  } else if (/\.(ts)$/i.test(req.path)) {
+    res.setHeader("Content-Type", "video/mp2t");
+    res.setHeader("Cache-Control", "public, max-age=15, immutable");
+  } else if (/\.(m4s)$/i.test(req.path)) {
+    res.setHeader("Content-Type", "video/iso.segment");
+    res.setHeader("Cache-Control", "public, max-age=15, immutable");
+  }
   next();
 });
 
-// Keep-Alive agents
-const insecureHttpsAgent = new https.Agent({
-  rejectUnauthorized: !ALLOW_INSECURE_TLS,
+// ===== Keep-Alive لوصلات الـ proxy =====
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
+const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
-  timeout: PROXY_TIMEOUT_MS
+  maxSockets: 128,
+  rejectUnauthorized: !ALLOW_INSECURE_TLS,
 });
-const httpAgent = new http.Agent({ keepAlive: true, timeout: PROXY_TIMEOUT_MS });
 
 function requestOnce(urlStr, headers) {
   const u = new URL(urlStr);
   const isHttps = u.protocol === "https:";
   const client = isHttps ? https : http;
-  const agent = isHttps ? insecureHttpsAgent : httpAgent;
-  const opts = {
-    method: "GET",
-    headers,
-    agent,
-    timeout: PROXY_TIMEOUT_MS,
-  };
+  const agent = isHttps ? keepAliveHttpsAgent : keepAliveHttpAgent;
+  const opts = { method: "GET", headers, agent, timeout: PROXY_TIMEOUT_MS };
   return new Promise((resolve, reject) => {
     const req = client.request(urlStr, opts, (up) => resolve(up));
-    req.on("timeout", () => {
-      req.destroy(new Error("Upstream request timeout"));
-    });
+    req.on("timeout", () => req.destroy(new Error("proxy timeout")));
     req.on("error", reject);
     req.end();
   });
@@ -96,7 +83,7 @@ async function fetchWithRedirects(urlStr, headers, maxRedirects = MAX_REDIRECTS)
     const sc = up.statusCode || 0;
     if (sc >= 300 && sc < 400 && up.headers.location) {
       const loc = up.headers.location;
-      up.resume(); // discard body
+      up.resume();
       current = new URL(loc, current).toString();
       continue;
     }
@@ -125,97 +112,68 @@ function rewriteManifest(text, basePath) {
     .join("\n");
 }
 
-// مساعد لتعيين Content-Type الصحيح
-function setContentTypeHeaders(reqPath, res, upstreamCT) {
-  const p = reqPath.toLowerCase();
-
-  if (p.endsWith(".m3u8") || upstreamCT?.includes("application/vnd.apple.mpegurl")) {
-    res.set("Content-Type", "application/vnd.apple.mpegurl");
-    return;
-  }
-  if (p.endsWith(".ts") || upstreamCT?.includes("video/mp2t")) {
-    res.set("Content-Type", "video/mp2t");
-    return;
-  }
-  if (p.endsWith(".m4s")) {
-    // CMAF segments
-    res.set("Content-Type", "video/iso.segment");
-    return;
-  }
-  if (upstreamCT) {
-    res.set("Content-Type", upstreamCT);
-  }
-}
-
-// Proxy HLS
+// ===== Proxy HLS =====
 app.get("/hls/*", async (req, res) => {
-  // تمرير الـ Range كما هو إن وُجد، واحترام Accept-Ranges
   try {
     const upstreamUrl = ORIGIN_BASE + req.originalUrl;
-    const originHost = new URL(ORIGIN_BASE).host;
     const headers = {
       ...req.headers,
-      host: originHost,
-      // منع ضغط غير متوقع من الأصل
-      "accept-encoding": "identity",
+      host: new URL(ORIGIN_BASE).host,
+      ...(req.headers.range ? { Range: req.headers.range } : {}),
+      Connection: "keep-alive",
     };
 
     const { up } = await fetchWithRedirects(upstreamUrl, headers);
 
-    // لو عميل أغلق الاتصال، أغلق upstream
-    const abortUpstream = () => {
-      try { up.destroy(); } catch {}
-    };
-    res.on("close", abortUpstream);
-    res.on("finish", abortUpstream);
-
-    // تمرير رؤوس مهمة
-    setContentTypeHeaders(req.path, res, up.headers["content-type"] || "");
+    // مرر بعض الترويسات
+    if (up.headers["content-type"]) res.set("Content-Type", up.headers["content-type"]);
     if (up.headers["content-length"]) res.set("Content-Length", up.headers["content-length"]);
     if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
     if (up.headers["content-range"]) res.set("Content-Range", up.headers["content-range"]);
 
-    // سياسات كاش: لا كاش للـ m3u8 — كاش خفيف للـ segments
-    const low = req.path.toLowerCase();
-    if (low.endsWith(".m3u8")) {
-      res.set("Cache-Control", "no-store, must-revalidate");
-    } else if (low.endsWith(".ts") || low.endsWith(".m4s")) {
-      res.set("Cache-Control", "public, max-age=15, immutable");
-    }
-
+    // استجابة خطأ من المصدر
     if ((up.statusCode || 0) >= 400) {
       res.status(up.statusCode).end();
       up.resume();
       return;
     }
 
+    // ملفات المانيفست: نعيد كتابتها للمرور عبر البروكسي
     if (/\.m3u8(\?.*)?$/i.test(req.path)) {
-      // إعادة كتابة الـ URIs داخل الـ manifest
       let data = "";
       up.setEncoding("utf8");
       up.on("data", (c) => (data += c));
       up.on("end", () => {
         const rewritten = rewriteManifest(data, req.originalUrl);
-        res.type("application/vnd.apple.mpegurl").send(rewritten);
+        res
+          .status(200)
+          .type("application/vnd.apple.mpegurl")
+          .set("Cache-Control", "no-store, must-revalidate")
+          .send(rewritten);
       });
       up.on("error", () => res.status(502).send("Upstream error"));
       return;
     }
 
-    // تمرير البث كما هو مع pipeline (تدفق آمن)
+    // المقاطع: مررها مباشرة
     res.status(up.statusCode || 200);
-    pipeline(up, res, (err) => {
-      if (err && !res.headersSent) {
-        res.status(502).end("Proxy pipeline error");
-      }
+    // تنظيف عند إغلاق اتصال العميل
+    res.on("close", () => {
+      try {
+        up.destroy();
+      } catch {}
     });
+    up.pipe(res);
   } catch (e) {
     console.error(e);
-    if (!res.headersSent) res.status(500).send("Proxy error");
+    res.status(500).send("Proxy error");
   }
 });
 
-// Test player (اختياري)
+// فحص الصحة
+app.get("/health", (_req, res) => res.type("text").send("ok"));
+
+// مشغل بسيط (اختياري)
 app.get("/player", (req, res) => {
   const src = req.query.src || "/hls/live/playlist.m3u8";
   res.type("html").send(`<!doctype html>
@@ -227,15 +185,10 @@ app.get("/player", (req, res) => {
 <video id="v" controls muted playsinline></video>
 <script>
 const v=document.getElementById('v'); const src=${JSON.stringify(src)};
-if (window.Hls && Hls.isSupported()) { const h=new Hls({lowLatencyMode:false}); h.loadSource(src); h.attachMedia(v); }
+if (window.Hls && Hls.isSupported()) { const h=new Hls(); h.loadSource(src); h.attachMedia(v); }
 else { v.src=src; }
 </script>
 </body></html>`);
-});
-
-// صحّة
-app.get("/health", (req, res) => {
-  res.json({ ok: true, origin: ORIGIN_BASE, insecureTLS: ALLOW_INSECURE_TLS });
 });
 
 app.listen(PORT, () => {
