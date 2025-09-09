@@ -9,7 +9,8 @@ import { fileURLToPath } from "url";
 import { URL } from "url";
 
 // ======= CONFIG =======
-const ORIGIN_BASE = process.env.ORIGIN_BASE || "http://46.152.116.98";
+// اجعله يوجّه إلى مزوّدك. افتراضيًا Mux:
+const ORIGIN_BASE = process.env.ORIGIN_BASE || "https://stream.mux.com";
 const PORT = process.env.PORT || 10000;
 const ALLOW_INSECURE_TLS = String(process.env.ALLOW_INSECURE_TLS || "true") === "true";
 const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS || 15000);
@@ -109,6 +110,7 @@ function rewriteManifest(text, basePath) {
     .join("\n");
 }
 
+// Proxy HLS عبر /hls/*
 app.get("/hls/*", async (req, res) => {
   try {
     const upstreamUrl = ORIGIN_BASE + req.originalUrl;
@@ -149,9 +151,7 @@ app.get("/hls/*", async (req, res) => {
     }
 
     res.status(up.statusCode || 200);
-    res.on("close", () => {
-      try { up.destroy(); } catch {}
-    });
+    res.on("close", () => { try { up.destroy(); } catch {} });
     up.pipe(res);
   } catch (e) {
     console.error(e);
