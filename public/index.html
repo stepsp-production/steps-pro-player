@@ -160,16 +160,36 @@
     function levelCapFor(isMirror=false){ return 360; } // سقف 360p للجميع
 
     const downlinkMbps = (navigator.connection && navigator.connection.downlink) ? navigator.connection.downlink : 2.5;
+
+    // ========= إعدادات HLS (مُقوّاة ضد التقطعات) =========
     const HLS_CONFIG_BASE = {
-      lowLatencyMode:false,startPosition:-1,liveSyncDuration:4,liveMaxLatencyDuration:18,maxLiveSyncPlaybackRate:1.15,
-      capLevelToPlayerSize:true,maxFragLookUpTolerance:0.25,maxBufferHole:0.5,
-      enableWorker:true,progressive:true,abrEwmaDefaultEstimate:Math.max(500_000,Math.min(2_500_000,downlinkMbps*500_000)),
-      abrMaxWithRealBitrate:true,fragLoadingMaxRetry:6,manifestLoadingMaxRetry:6,levelLoadingMaxRetry:5,
-      fragLoadingRetryDelay:350,manifestLoadingRetryDelay:500,levelLoadingRetryDelay:500,
-      fragLoadingTimeOut:10000,manifestLoadingTimeOut:8000,levelLoadingTimeOut:8000,
-      xhrSetup:(xhr)=>{try{xhr.withCredentials=false;}catch(e){}}
+      lowLatencyMode: false,
+      liveSyncDurationCount: 3,       // المزامنة على عدد المقاطع (أكثر ثباتًا)
+      capLevelToPlayerSize: true,
+      maxFragLookUpTolerance: 0.25,
+      maxBufferHole: 1.0,             // سمح بفجوات صغيرة دون توقف
+      maxSeekHole: 2.0,
+      nudgeOffset: 0.20,              // دفعة أكبر لتجاوز التعليق
+      nudgeMaxRetry: 6,
+      enableWorker: true,
+      progressive: false,             // يقلّل jitter على أجهزة أضعف
+      abrEwmaDefaultEstimate: Math.max(500_000,Math.min(2_500_000,downlinkMbps*500_000)),
+      abrMaxWithRealBitrate: true,
+      fragLoadingMaxRetry: 6,
+      manifestLoadingMaxRetry: 6,
+      levelLoadingMaxRetry: 5,
+      fragLoadingRetryDelay: 350,
+      manifestLoadingRetryDelay: 500,
+      levelLoadingRetryDelay: 500,
+      fragLoadingTimeOut: 10000,
+      manifestLoadingTimeOut: 8000,
+      levelLoadingTimeOut: 8000,
+      fpsDroppedMonitoringPeriod: 1000,
+      fpsDroppedMonitoringThreshold: 0.15,
+      xhrSetup:(xhr)=>{ try{xhr.withCredentials=false;}catch(e){} }
     };
-    const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:28, backBufferLength:50 };
+    // بافر افتراضي كبير للرئيسي
+    const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength: 28, backBufferLength: 50 };
 
     async function isCodecSupported(codec){
       if(navigator.mediaCapabilities?.decodingInfo){
@@ -208,7 +228,9 @@
       return false;
     }
 
+    // ========== منطق الاستشفاء + مراقِب التقطّع ==========
     function attachRecovery(hls, video, role){
+      // ضبط المستوى + سقف الجودة
       hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{ try{
         const idx=pickPlayableLevel(data?.levels||[]); if(idx>=0){ hls.startLevel=idx; hls.currentLevel=idx; hls.nextLevel=idx; }
         const isMirror=(role!=='main'); const capHeight=levelCapFor(isMirror);
@@ -217,30 +239,52 @@
           if (capIndex < 0) capIndex = levels.length - 1;
           hls.autoLevelCapping = Math.max(0, capIndex - 1);
         }
-        if (isMirror) { hls.config.maxBufferLength = performanceLightMode ? 8 : 14; hls.config.backBufferLength = 12; }
+        if (isMirror) { hls.config.maxBufferLength = performanceLightMode ? 10 : 14; hls.config.backBufferLength = 12; }
         else { hls.config.maxBufferLength = performanceLightMode ? 24 : 28; hls.config.backBufferLength = performanceLightMode ? 36 : 50; }
         hls.capLevelToPlayerSize = true;
       }catch(e){} });
 
+      // استخلاص PDT/sequence + شفاء الفجوات
       hls.on(Hls.Events.LEVEL_UPDATED,(_,data)=>{ if(data?.details?.live){ hls.latencyController?.computeLivePosition?.(); } healGapIfNeeded(video); });
+      hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{ const pdtMs=data?.frag?.programDateTime; if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; } });
 
-      hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{
-        const pdtMs=data?.frag?.programDateTime;
-        if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; }
-      });
+      // مراقبة التقطعات المتكررة → خفّض المستوى مؤقتًا
+      let stallCount = 0;
+      function softenQuality() {
+        try{
+          const lvls = hls.levels||[];
+          if(!lvls.length) return;
+          const targetH = 240; // اخفّض إلى ~240p عند الأزمة
+          let cap = lvls.findIndex(l => (l.height||0) >= targetH);
+          if (cap < 0) cap = lvls.length-1;
+          hls.autoLevelCapping = Math.max(0, cap - 1);
+        }catch(e){}
+      }
 
       hls.on(Hls.Events.ERROR,(_,err)=>{
-        const d=err||{}; const isNet=d.type===Hls.ErrorTypes.NETWORK_ERROR; const details=String(d.details||'');
-        if(isNet){ try{ hls.stopLoad(); }catch(e){} try{ hls.startLoad(0); }catch(e){} healGapIfNeeded(video); return; }
+        const d=err||{}; const isNet=d.type===Hls.ErrorTypes.NETWORK_ERROR;
+        const details=String(d.details||'');
+        if(isNet){
+          stallCount++;
+          try{ hls.stopLoad(); }catch(e){} try{ hls.startLoad(0); }catch(e){}
+          if (stallCount >= 3) { softenQuality(); stallCount = 0; }
+          healGapIfNeeded(video); return;
+        }
         if (/(BUFFER_|FRAG_PARSING|DECODE|MANIFEST_INCOMPATIBLE_CODECS)/i.test(details)){
-          try{ hls.immediateLevelSwitch && hls.immediateLevelSwitch(); }catch(e){} try{ hls.swapAudioCodec?.(); hls.recoverMediaError?.(); }catch(e){} healGapIfNeeded(video); return;
+          stallCount++;
+          try{ hls.immediateLevelSwitch && hls.immediateLevelSwitch(); }catch(e){}
+          try{ hls.swapAudioCodec?.(); hls.recoverMediaError?.(); }catch(e){}
+          if (stallCount >= 3) { softenQuality(); stallCount = 0; }
+          healGapIfNeeded(video); return;
         }
         if (d.fatal){ try{ hls.recoverMediaError?.(); }catch(e){} }
       });
 
-      const onWaiting=()=>healGapIfNeeded(video);
+      // مراقبة waiting/stalled
+      const onWaiting=()=>{ healGapIfNeeded(video); };
       video.addEventListener('waiting', onWaiting); video.addEventListener('stalled', onWaiting);
 
+      // حلقة مراقبة خفيفة
       let lastT=0, still=0;
       const poll=()=>{ const t=video.currentTime||0;
         if(video.readyState>=2 && !video.paused){
@@ -250,6 +294,34 @@
       if('requestVideoFrameCallback' in HTMLVideoElement.prototype){
         const loop=()=>{ try{ poll(); video.requestVideoFrameCallback(loop);}catch(e){} }; try{ video.requestVideoFrameCallback(loop);}catch(e){ setInterval(poll,1500); }
       } else setInterval(poll,1500);
+    }
+
+    // ========== منسّق توقفات الـ MAIN ==========
+    function attachMainStallCoordinator(mainVideo, camVideo){
+      const freezeFrom = (video)=>{
+        try{
+          const root=document.getElementById('playerContainer');
+          const freezeLayer=document.getElementById('freezeLayer');
+          const w=root.clientWidth,h=root.clientHeight; freezeLayer.width=w; freezeLayer.height=h;
+          const ctx=freezeLayer.getContext('2d'); ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
+          const rect=(video.getBoundingClientRect && video.parentElement)?video.parentElement.getBoundingClientRect():{width:w,height:h,left:0,top:0};
+          const scaleX=w/rect.width, scaleY=h/rect.height; ctx.save(); ctx.scale(scaleX,scaleY); ctx.drawImage(video,0,0,rect.width,rect.height); ctx.restore(); freezeLayer.style.opacity='1';
+        }catch(e){}
+      };
+      const unfreeze = ()=>{ document.getElementById('freezeLayer').style.opacity='0'; };
+
+      const onStall = ()=>{ freezeFrom(mainVideo); try{ camVideo?.pause?.(); }catch(e){} };
+      const onResume = async ()=>{
+        unfreeze();
+        try{ await camVideo?.play?.(); }catch(e){}
+        // أعِدْ الضبط: اجعل الكاميرا تلحق الـ main بدقّة
+        try{
+          const mt = await getMainTime();
+          await seekActiveTo(pdtAlignedTarget(mt));
+        }catch(e){}
+      };
+      ['waiting','stalled','suspend','emptied','seeking'].forEach(ev=> mainVideo.addEventListener(ev,onStall));
+      ['playing','canplay','canplaythrough','seeked'].forEach(ev=> mainVideo.addEventListener(ev,onResume));
     }
 
     /* DOM refs */
@@ -390,6 +462,7 @@
       if(started) return;
       started=true; gatePlay.classList.add('hidden'); globalControls.classList.remove('hidden');
       await playEntity(mainPlayer,true); await playEntity(activePlayer,true);
+      attachMainStallCoordinator(mainContainer.querySelector('video'), camContainer.querySelector('video'));
       setTimeout(syncCams,220); positionUtilityDock(); startTimeTicker(); reflectSoundState();
     }
 
@@ -439,7 +512,7 @@
       const currentVid = camContainer.querySelector('video') || mainContainer.querySelector('video');
       if(currentVid) freezeFrom(currentVid);
       const newcomer=createVideo(camContainer, sources[cam], 'active');
-      const promote=async()=>{ activePlayer=newcomer; await playEntity(activePlayer,true); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); SYNC_MGR?.ensureHiddenMirrors?.(); };
+      const promote=async()=>{ activePlayer=newcomer; await playEntity(activePlayer,true); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); SYNC_MGR?.ensureHiddenMirrors?.(); attachMainStallCoordinator(mainContainer.querySelector('video'), activePlayer); };
       if(newcomer instanceof HTMLVideoElement){ newcomer.addEventListener('canplay',promote,{once:true}); newcomer.play().catch(()=>{}); } else { promote(); }
     }
 
@@ -465,12 +538,10 @@
     function warmFetch(url){ if(!hasUrl(url)) return; try{ fetch(url, {mode:'no-cors', cache:'reload'}).catch(()=>{}); }catch(e){} }
     const warmList = Object.values(window.sources).filter(hasUrl);
 
-    // --- نسخة واحدة من initPlayersOnce (eager + warm) ---
+    // --- initOnce (eager + warm) ---
     function initPlayersOnce(){
       if(inited) return; inited=true;
-      // eager main
       if(!mainPlayer){ mainPlayer = createVideo(mainContainer, sources.main, 'main'); if(mainPlayer.__hls){ try{ mainPlayer.__hls.startLoad(0); }catch(e){} } setTimeout(()=>{ try{ mainPlayer.load?.(); }catch(e){} }, 600); }
-      // eager active (أول كاميرا متاحة)
       const ids = Object.keys(sources).filter(k=>k!=='main' && hasUrl(sources[k]));
       if(ids.length) currentCam = ids[0];
       document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
@@ -488,7 +559,7 @@
     (function autoUi(){ let t=null; const wake=()=>{ document.body.classList.add('ui-awake'); clearTimeout(t); t=setTimeout(()=>document.body.classList.remove('ui-awake'), 1800); }; ['mousemove','touchstart','touchmove','keydown','click'].forEach(ev=>window.addEventListener(ev,wake,{passive:true})); wake();})();
   </script>
 
-  <!-- ======== مدير المزامنة + مرآة واحدة فقط ======== -->
+  <!-- ======== مدير المزامنة + مرآة واحدة فقط (كما هو مع مطاردة أدق) ======== -->
   <script>
   const STREAM_META = {};
   function trackHlsMeta(hls, roleId){
@@ -505,12 +576,30 @@
       if(mainMeta?.sn!=null && camMeta?.sn!=null && (camMeta.targetDur||mainMeta.targetDur)){ const td=camMeta.targetDur||mainMeta.targetDur||4; const snDiff=(mainMeta.sn-camMeta.sn); return mainTime + (snDiff*td); }
       return mainTime;
     }
-    gentlyChase(video, delta){ const ad=Math.abs(delta); const want=(delta>0?0.95:1.05); if(ad<0.06){ this.setPlaybackRate(video,1); return; } if(ad<0.50){ this.setPlaybackRate(video,want); return; } this.setPlaybackRate(video,1); }
-    setPlaybackRate(video, rate){ try{ if(Math.abs((video.playbackRate||1)-rate)<0.005) return; video.playbackRate=rate; clearTimeout(this.desiredRateResetTimers.get(video)); const t=setTimeout(()=>{ try{ video.playbackRate=1; }catch(e){} },1200); this.desiredRateResetTimers.set(video,t);}catch(e){} }
+    gentlyChase(video, delta){
+      const ad=Math.abs(delta);
+      // مطاردة أكثر حزمًا لتصفير الانزياح سريعًا بدون قفزات
+      if(ad < 0.06){ this.setPlaybackRate(video,1); return; }
+      if(ad < 0.25){ this.setPlaybackRate(video, (delta>0?0.985:1.015)); return; }
+      if(ad < 0.60){ this.setPlaybackRate(video, (delta>0?0.95:1.05)); return; }
+      this.setPlaybackRate(video, 1);
+    }
+    setPlaybackRate(video, rate){
+      try{
+        if(Math.abs((video.playbackRate||1)-rate)<0.005) return;
+        video.playbackRate=rate;
+        clearTimeout(this.desiredRateResetTimers.get(video));
+        const t=setTimeout(()=>{ try{ video.playbackRate=1; }catch(e){} },1200);
+        this.desiredRateResetTimers.set(video,t);
+      }catch(e){}
+    }
     async forceRealign(video, target){ await this.seekVideoTo(video, target); await healGapIfNeeded(video); }
     async seekVideoTo(video, target){
-      try{ const r=video.seekable; if(r&&r.length){ const start=r.start(r.length-1), end=r.end(r.length-1); target=Math.min(Math.max(target,start+0.05), end-0.05); }
-        if('setCurrentTime' in video){ await video.setCurrentTime(target).catch(()=>{}); return; } video.currentTime=target; }catch(e){}
+      try{
+        const r=video.seekable; if(r&&r.length){ const start=r.start(r.length-1), end=r.end(r.length-1); target=Math.min(Math.max(target,start+0.05), end-0.05); }
+        if('setCurrentTime' in video){ await video.setCurrentTime(target).catch(()=>{}); return; }
+        video.currentTime=target;
+      }catch(e){}
     }
     start(){
       if(this.loop) return;
@@ -523,7 +612,7 @@
             const camId=currentCam; const target=this.computeTargetFor(camId, mainTime);
             let delta=(activePlayer.currentTime||0)-target;
             if(!hasBufferedAround(activePlayer)) await healGapIfNeeded(activePlayer);
-            if(Math.abs(delta)>1.25){ await this.forceRealign(activePlayer, target); } else { this.gentlyChase(activePlayer, delta); }
+            if(Math.abs(delta)>1.00){ await this.forceRealign(activePlayer, target); } else { this.gentlyChase(activePlayer, delta); }
             if(hasBufferedAround(activePlayer)){ (this.hiddenPool[camId] ??= {}).lastOkTs = performance.now(); }
           }
 
@@ -535,7 +624,7 @@
               const healed=await healGapIfNeeded(v);
               if(!healed){ const lastOk=node.lastOkTs||0; if(performance.now()-lastOk>4000){ try{ node.hls?.stopLoad?.(); node.hls?.destroy?.(); }catch(e){} delete this.hiddenPool[camId]; continue; } }
             } else { node.lastOkTs=performance.now(); }
-            if(Math.abs(d)>1.5){ await this.forceRealign(v, target); } else { this.gentlyChase(v, d); }
+            if(Math.abs(d)>1.25){ await this.forceRealign(v, target); } else { this.gentlyChase(v, d); }
           }
         }catch(e){}
         this.loop=requestAnimationFrame(tick);
@@ -565,7 +654,7 @@
       wrap.appendChild(v); preloadBin.appendChild(wrap);
 
       const cfg={...HLS_CONFIG_BASE};
-      cfg.maxBufferLength = 8;
+      cfg.maxBufferLength = 10;
       cfg.backBufferLength = 10;
 
       const hls=(window.Hls && Hls.isSupported())? new Hls(cfg): null;
@@ -621,7 +710,7 @@
   };
 </script>
 
-<!-- ===== DEBUG OVERLAY ===== -->
+<!-- ===== DEBUG OVERLAY (كما هو) ===== -->
 <script>
 (function(){
   const box = document.createElement('div');
@@ -650,12 +739,7 @@
       return 0;
     }catch(e){return 0;}
   }
-
-  function netStr(){
-    const c = navigator.connection;
-    if(!c) return '';
-    return `(${(c.downlink||0).toFixed(1)}Mbps ${c.effectiveType||''})`;
-  }
+  function netStr(){ const c = navigator.connection; if(!c) return ''; return `(${(c.downlink||0).toFixed(1)}Mbps ${c.effectiveType||''})`; }
 
   setInterval(async ()=>{
     try{
