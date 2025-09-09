@@ -22,7 +22,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط الميديا
+// لا نضغط ملفات الميديا
 app.use(
   compression({
     filter: (req, res) => (!/\.(m3u8|ts|m4s|mp4|key)$/i.test(req.path) && compression.filter(req, res)),
@@ -98,14 +98,13 @@ function absoluteToProxy(u) {
     const url = new URL(u);
     return `/hls${url.pathname}${url.search || ""}`;
   } catch {
-    // مسار يبدأ بـ/ بدون بروتوكول
     if (typeof u === "string" && u.startsWith("/")) return `/hls${u}`;
     return u;
   }
 }
 
-// إعادة كتابة الـmanifest بالكامل (سطور + URI داخل التاجّات)
-function rewriteManifest(text, baseDir) {
+// إعادة كتابة manifest (يشمل URI داخل التاجّات)
+function rewriteManifest(text, baseDirProxy) {
   const ABS_HTTP = /^(https?:)?\/\//i;
   const TAGS_WITH_URI = [
     "EXT-X-KEY",
@@ -121,33 +120,38 @@ function rewriteManifest(text, baseDir) {
     .map((line) => {
       const t = line.trim();
 
-      // 1) تاجات تحتوي URI="..."
+      // وسوم فيها URI="..."
       if (TAGS_RE.test(t)) {
         return line.replace(/URI="([^"]+)"/gi, (_m, uri) => {
           if (ABS_HTTP.test(uri) || uri.startsWith("/")) return `URI="${absoluteToProxy(uri)}"`;
-          return `URI="${baseDir}${uri}"`;
+          return `URI="${baseDirProxy}${uri}"`; // نسبي -> داخل مجلد الـPlayback ID
         });
       }
 
-      // 2) باقي السطور: لو رابط (نسبي/مطلق)
-      if (!t || t.startsWith("#")) return line; // تعليق/أوامر
+      // السطور العادية
+      if (!t || t.startsWith("#")) return line;
       if (ABS_HTTP.test(t) || t.startsWith("/")) return absoluteToProxy(t);
-      return baseDir + t;
+      return baseDirProxy + t; // نسبي
     })
     .join("\n");
+}
+
+// احسب baseDirProxy بشكل صحيح لمُعرِّف Mux
+function computeBaseDirProxy(reqOriginalUrl) {
+  const noQuery = reqOriginalUrl.replace(/[?#].*$/, "");
+  // حالة master: /hls/<ID>.m3u8 => /hls/<ID>/
+  const m = noQuery.match(/^\/hls\/([^/?#]+)\.m3u8$/i);
+  if (m) return `/hls/${m[1]}/`;
+  // حالة القوائم الداخلية: /hls/<ID>/.../foo.m3u8 => أبقي المجلد كما هو
+  return noQuery.replace(/\/[^/]*$/, "/");
 }
 
 // Proxy HLS عبر /hls/*
 app.get("/hls/*", async (req, res) => {
   try {
-    // أزل /hls قبل الإرسال للأصل
     const upstreamPathWithQuery = req.originalUrl.replace(/^\/hls/, "");
     const upstreamUrl = ORIGIN_BASE + upstreamPathWithQuery;
 
-    // مجلد أساس النسخة المعاد كتابتها تحت /hls/
-    const baseDir = req.originalUrl.replace(/[?#].*$/, "").replace(/\/[^/]*$/, "/");
-
-    // رؤوس: أجبِر الهوية (بدون gzip) ليسهل إعادة الكتابة
     const headers = {
       ...req.headers,
       host: new URL(ORIGIN_BASE).host,
@@ -158,10 +162,14 @@ app.get("/hls/*", async (req, res) => {
 
     const { up } = await fetchWithRedirects(upstreamUrl, headers);
 
-    if (up.headers["content-type"]) res.set("Content-Type", up.headers["content-type"]);
-    if (up.headers["content-length"]) res.set("Content-Length", up.headers["content-length"]);
-    if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
-    if (up.headers["content-range"]) res.set("Content-Range", up.headers["content-range"]);
+    const isManifest = /\.m3u8(\?.*)?$/i.test(req.originalUrl);
+
+    if (!isManifest) {
+      if (up.headers["content-type"]) res.set("Content-Type", up.headers["content-type"]);
+      if (up.headers["content-length"]) res.set("Content-Length", up.headers["content-length"]);
+      if (up.headers["accept-ranges"]) res.set("Accept-Ranges", up.headers["accept-ranges"]);
+      if (up.headers["content-range"]) res.set("Content-Range", up.headers["content-range"]);
+    }
 
     if ((up.statusCode || 0) >= 400) {
       res.status(up.statusCode).end();
@@ -169,12 +177,13 @@ app.get("/hls/*", async (req, res) => {
       return;
     }
 
-    if (/\.m3u8(\?.*)?$/i.test(req.path)) {
+    if (isManifest) {
+      const baseDirProxy = computeBaseDirProxy(req.originalUrl);
       let data = "";
-      up.setEncoding("utf8"); // مضمون غير مضغوط (identity)
+      up.setEncoding("utf8"); // مضمون غير مضغوط
       up.on("data", (c) => (data += c));
       up.on("end", () => {
-        const rewritten = rewriteManifest(data, baseDir);
+        const rewritten = rewriteManifest(data, baseDirProxy);
         res
           .status(200)
           .type("application/vnd.apple.mpegurl")
