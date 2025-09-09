@@ -22,7 +22,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(morgan("tiny"));
 
-// لا نضغط ملفات الفيديو/المقاطع
+// لا نضغط ملفات الفيديو
 app.use(
   compression({
     filter: (req, res) => (!/\.(m3u8|ts|m4s)$/i.test(req.path) && compression.filter(req, res)),
@@ -86,38 +86,60 @@ async function fetchWithRedirects(urlStr, headers, maxRedirects = MAX_REDIRECTS)
   throw new Error("Too many redirects");
 }
 
-// إعادة كتابة روابط الـmanifest لتعود عبر /hls
+// تحويل مسار مطلق -> عبر بروكسي /hls
+function absolutetoProxy(u) {
+  try {
+    const url = new URL(u);
+    return `/hls${url.pathname}${url.search || ""}`;
+  } catch {
+    return u;
+  }
+}
+
+// إعادة كتابة manifest: السطور + URI داخل التاجّات (#EXT-...).
 function rewriteManifest(text, baseDir) {
-  return text
-    .split("\n")
-    .map((line) => {
-      const t = line.trim();
-      if (!t || t.startsWith("#")) return line;
-      if (/^https?:\/\//i.test(t)) {
-        try {
-          const url = new URL(t);
-          return `/hls${url.pathname}${url.search || ""}`;
-        } catch {
-          return line;
-        }
-      }
-      // مسار نسبي -> نفس مجلد الـmanifest تحت /hls/
-      return baseDir + t;
-    })
-    .join("\n");
+  const ABS = /^(https?:)?\/\//i;
+  // عدّد أهم التاجّات التي تحمل URI:
+  const TAGS_WITH_URI = [
+    "EXT-X-KEY", "EXT-X-MAP", "EXT-X-MEDIA", "EXT-X-I-FRAME-STREAM-INF",
+    "EXT-X-SESSION-DATA", "EXT-X-START" // (START قد يحتوي على TIME-OFFSET فقط عادة)
+  ];
+  const TAGS_RE = new RegExp(`^#(?:${TAGS_WITH_URI.join("|")}):`, "i");
+
+  return text.split("\n").map((line) => {
+    const t = line.trim();
+
+    // 1) التاجّات التي تحتوي URI="..."
+    if (TAGS_RE.test(t)) {
+      // استبدل كل URI="...":
+      return line.replace(/URI="([^"]+)"/gi, (_m, uri) => {
+        if (ABS.test(uri)) return `URI="${absolutetoProxy(uri)}"`;
+        // نسبي -> الصقه بمجلد الـmanifest
+        return `URI="${baseDir}${uri}"`;
+      });
+    }
+
+    // 2) السطور العادية (غير التاجّات) تحمل روابط قوائم/مقاطع
+    if (!t || t.startsWith("#")) return line; // تعليقات أخرى
+    if (/^https?:\/\//i.test(t)) {
+      return absolutetoProxy(t);
+    }
+    // رابط نسبي
+    return baseDir + t;
+  }).join("\n");
 }
 
 // Proxy HLS عبر /hls/*
 app.get("/hls/*", async (req, res) => {
   try {
-    // أزل بادئة /hls من الطلب قبل إرساله للأصل (Mux لا يستخدم /hls)
+    // أزل /hls من الطلب قبل إرساله للأصل
     const upstreamPathWithQuery = req.originalUrl.replace(/^\/hls/, "");
     const upstreamUrl = ORIGIN_BASE + upstreamPathWithQuery;
 
-    // لحساب روابط نسبية داخل الـmanifest (مثل index.m3u8 / segments)
+    // مجلد الأساس داخل /hls/… لاستخدامه مع الروابط النسبية
     const baseDir = req.originalUrl
-      .replace(/[?#].*$/, "")        // احذف الاستعلام
-      .replace(/\/[^/]*$/, "/");     // احتفظ بالمجلد فقط
+      .replace(/[?#].*$/, "")
+      .replace(/\/[^/]*$/, "/");
 
     const headers = {
       ...req.headers,
