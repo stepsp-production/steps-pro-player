@@ -55,7 +55,7 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
 #gatePlay{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:linear-gradient(140deg,rgba(0,0,0,.55),rgba(0,0,0,.2));backdrop-filter:blur(2px)}
 #gatePlay.hidden{display:none}
 .gate-card{background:var(--panel-bg);border:1px solid var(--panel-bd);border-radius:18px;padding:18px 20px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 40px rgba(0,0,0,.45)}
-.gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bd);color:#fff;background:#111a;font-size:18px}
+.gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bد);color:#fff;background:#111a;font-size:18px}
 #startBtn{min-width:160px}
 
 @media(orientation:portrait){
@@ -82,7 +82,7 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
       <div class="icon">▶</div>
       <div>
         <div style="color:#fff;font-weight:800;margin-bottom:6px">ابدأ التشغيل والمزامنة</div>
-        <div style="font-size:12px;color:#eaeaf0b3">الشريط يعمل بعد الضغط على تشغيل</div>
+        <div style="font-size:12px;color:#eaeaf0b3">سيظهر الشريط بعد الضغط على تشغيل</div>
       </div>
       <button id="startBtn" aria-label="ابدأ التشغيل الآن">تشغيل/بدء المزامنة</button>
     </div>
@@ -102,7 +102,7 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
     </div>
   </div>
 
-  <!-- الشريط الموحّد (مخفي حتى نضغط تشغيل) -->
+  <!-- الشريط (يظهر بعد البدء) -->
   <div id="globalControls" class="hidden" role="group" aria-label="تحكم موحّد">
     <button id="gBack" title="⏪ -5s">⏪ 5s</button>
     <button id="gPlay" title="⏯">⏯</button>
@@ -130,7 +130,7 @@ body.ui-awake button{opacity:1} button:hover{background:var(--btn-bg-h);box-shad
 </div>
 
 <script>
-/* ===== مصادر ===== */
+/* ========= مصادر ========= */
 window.sources = {
   main:  "https://stream.mux.com/jIy7RfNkNJqkZ1008eyc01WH9i4Nh37Q001xqZEdA50000LI.m3u8",
   cam1:  "",
@@ -144,50 +144,66 @@ window.sources = {
 </script>
 
 <script>
-/* ===== إعداد عام ===== */
+/* ========= إعداد HLS عام ========= */
 const hasUrl = (u)=> typeof u==='string' && /^https?:\/\/.+/.test(u);
-const MIRRORS_ENABLED = false;
+const MIRRORS_ENABLED = false; // لا مرايا
 let performanceLightMode = true;
-function levelCapFor(){ return 360; }
 
-const downlinkMbps = (navigator.connection && navigator.connection.downlink) ? navigator.connection.downlink : 2.5;
 const HLS_CONFIG_BASE = {
-  lowLatencyMode:false, liveSyncDurationCount:3, capLevelToPlayerSize:true,
-  maxFragLookUpTolerance:0.25, maxBufferHole:1.0, maxSeekHole:2.0,
-  nudgeOffset:0.20, nudgeMaxRetry:6, enableWorker:true, progressive:false,
-  abrEwmaDefaultEstimate:Math.max(500_000,Math.min(2_500_000,downlinkMbps*500_000)),
+  lowLatencyMode:false,
+  liveSyncDurationCount:3,
+  capLevelToPlayerSize:true,
+  maxFragLookUpTolerance:0.25,
+  maxBufferHole:1.0,
+  maxSeekHole:2.0,
+  nudgeOffset:0.2,
+  nudgeMaxRetry:6,
+  enableWorker:true,
+  progressive:false,
   abrMaxWithRealBitrate:true,
-  fragLoadingMaxRetry:6, manifestLoadingMaxRetry:6, levelLoadingMaxRetry:5,
-  fragLoadingRetryDelay:350, manifestLoadingRetryDelay:500, levelLoadingRetryDelay:500,
-  fragLoadingTimeOut:10000, manifestLoadingTimeOut:8000, levelLoadingTimeOut:8000,
-  fpsDroppedMonitoringPeriod:1000, fpsDroppedMonitoringThreshold:0.15,
+  fragLoadingMaxRetry:6,
+  manifestLoadingMaxRetry:6,
+  levelLoadingMaxRetry:5,
+  fragLoadingRetryDelay:350,
+  manifestLoadingRetryDelay:500,
+  levelLoadingRetryDelay:500,
+  fragLoadingTimeOut:10000,
+  manifestLoadingTimeOut:8000,
+  levelLoadingTimeOut:8000,
+  fpsDroppedMonitoringPeriod:1000,
+  fpsDroppedMonitoringThreshold:0.15,
   xhrSetup:(xhr)=>{ try{xhr.withCredentials=false;}catch(e){} }
 };
-const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:28, backBufferLength:60 };
+// بافر واقعي للبث المباشر
+const HLS_CONFIG = { ...HLS_CONFIG_BASE, maxBufferLength:18, backBufferLength:40 };
 
-async function isCodecSupported(codec){
-  if(navigator.mediaCapabilities?.decodingInfo){
-    try{
-      const info=await navigator.mediaCapabilities.decodingInfo({type:'file',video:{contentType:`video/mp4; codecs="${codec}"`,width:1920,height:1080,bitrate:3_000_000,framerate:30}});
-      return !!info.supported;
-    }catch(e){}
-  }
-  const v=document.createElement('video'); return !!v.canPlayType(`video/mp4; codecs="${codec}"`);
+/* ——— دوال مساعدة لاختيار AVC فقط ——— */
+function isAvc(l){ return /avc1/i.test(l?.codecs || l?.codecsVideo || ""); }
+function isHevc(l){ return /(hvc1|hev1)/i.test(l?.codecs || l?.codecsVideo || ""); }
+function pickBestAvc(levels, capHeight=360){
+  if(!levels?.length) return -1;
+  const avcIdx = levels
+    .map((l,i)=>({i,h:l.height||0,avc:isAvc(l)}))
+    .filter(x=>x.avc);
+  if(!avcIdx.length) return 0; // لا يوجد AVC → خذه كما هو
+  // اختر أقرب <= capHeight، وإن لم يوجد اختر أدنى AVC
+  let candidates = avcIdx.filter(x=>x.h && x.h<=capHeight);
+  if(!candidates.length) candidates = avcIdx;
+  // الأقل ارتفاعًا لأقل تحميل
+  candidates.sort((a,b)=>a.h-b.h);
+  return candidates[candidates.length-1].i;
 }
-const SUPPORTS={avc:null,hevc:null};
-(async()=>{SUPPORTS.avc=await isCodecSupported('avc1.640028')||await isCodecSupported('avc1.4d401f')||await isCodecSupported('avc1.42E01E'); SUPPORTS.hevc=await isCodecSupported('hvc1.1.6.L93.B0')||await isCodecSupported('hev1.1.6.L93.B0');})();
-
-function pickPlayableLevel(levels){
-  let i=levels.findIndex(l=>/avc1/i.test(l?.codecs||l?.codecsVideo||'')); if(i>=0 && SUPPORTS.avc) return i;
-  i=levels.findIndex(l=>/(hvc1|hev1)/i.test(l?.codecs||l?.codecsVideo||'')); if(i>=0 && SUPPORTS.hevc) return i;
-  return levels?.length?0:-1;
+function highestAvcIndex(levels){
+  let max=-1;
+  (levels||[]).forEach((l,i)=>{ if(isAvc(l)) max=i; });
+  return max>=0 ? max : (levels?.length? levels.length-1 : -1);
 }
 
-/* ===== فجوات ===== */
-function hasBufferedAround(video, pad = 0.08){
-  try{ const t=video.currentTime||0, r=video.buffered; if(!r||!r.length) return false;
-    for(let i=0;i<r.length;i++){ const s=r.start(i), e=r.end(i); if(t>=s-pad && t<=e+pad) return true; } }catch(e){}
-  return false;
+/* ========= فجوات وسلامة ========= */
+function clampToSeekable(video,t){
+  const r=video.seekable; if(!r||!r.length) return t;
+  const start=r.start(r.length-1), end=r.end(r.length-1);
+  return Math.min(Math.max(t, start+0.05), end-0.05);
 }
 function findNextBufferedStart(video){
   try{ const t=video.currentTime||0, r=video.buffered; if(!r||!r.length) return null;
@@ -195,9 +211,14 @@ function findNextBufferedStart(video){
   return null;
 }
 async function healGapIfNeeded(video){
-  if(hasBufferedAround(video)) return false;
-  const next=findNextBufferedStart(video); if(next==null) return false;
-  try{ if('setCurrentTime' in video) await video.setCurrentTime(next).catch(()=>{}); else video.currentTime=next; await video.play().catch(()=>{}); return true; }catch(e){}
+  try{
+    const r=video.buffered; if(!r||!r.length) return false;
+    const t=video.currentTime||0;
+    for(let i=0;i<r.length;i++){ const s=r.start(i), e=r.end(i);
+      if(t>=s && t<=e) return false;
+      if(t< s){ video.currentTime = s+0.04; await video.play().catch(()=>{}); return true; }
+    }
+  }catch(e){}
   return false;
 }
 async function waitForSeekable(video, timeoutMs=6000){
@@ -209,11 +230,10 @@ async function waitForSeekable(video, timeoutMs=6000){
   })(); });
 }
 
-/* ===== مزامنة وجودة ===== */
+/* ========= مزامنة وتأخير ذكي ========= */
 const SYNC={ main:{pdtOffset:null}, active:{pdtOffset:null} };
 function pdtAlignedTarget(mainCt){ const offM=SYNC.main.pdtOffset, offA=SYNC.active.pdtOffset; if(offM!=null && offA!=null) return (offM + (mainCt||0)) - offA; return mainCt; }
 
-/* ——— حساب التأخير الفعلي ضمن نافذة البث ——— */
 function getSeekableMetrics(video){
   try{
     const r=video.seekable; if(!r||!r.length) return null;
@@ -223,26 +243,23 @@ function getSeekableMetrics(video){
     return {start,end,size,isSlidingLive};
   }catch(e){ return null; }
 }
-let globalDelaySec = 5;      // المطلوب من المستخدم
-let appliedDelaySec = 5;     // المطبَّق فعليًا داخل النافذة
-const SAFETY_MARGIN = 1.2;   // هامش أمان من طرف الحافة
-function computeSafeDelay(){
-  const m=getSeekableMetrics(mainPlayer);
+let globalDelaySec = 5;
+let appliedDelaySec = 5;
+const SAFETY_MARGIN = 1.2;
+function computeSafeDelay(mainVideo){
+  const m=getSeekableMetrics(mainVideo);
   if(!m){ appliedDelaySec = globalDelaySec; return; }
   if(m.isSlidingLive){
     const maxDelay = Math.max(0.6, m.size - SAFETY_MARGIN);
     appliedDelaySec = Math.min(globalDelaySec, maxDelay);
     appliedDelaySec = Math.max(0.5, appliedDelaySec);
   }else{
-    appliedDelaySec = globalDelaySec; // VOD
+    appliedDelaySec = globalDelaySec;
   }
 }
-function updateDelayLabel(){
-  document.getElementById('delayLabel').textContent =
-    `Delay: ${globalDelaySec.toFixed(1)}s (فعلي ${appliedDelaySec.toFixed(1)}s)`;
-}
+function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
 
-/* ===== DOM & حالة ===== */
+/* ========= DOM ========= */
 const root=document.getElementById('playerContainer');
 const mainContainer=document.getElementById('mainPreview');
 const camContainer=document.getElementById('activeCam');
@@ -261,72 +278,110 @@ const timeLabel=document.getElementById('timeLabel');
 const delayRange=document.getElementById('delayRange');
 const delayMinus=document.getElementById('delayMinus');
 const delayPlus=document.getElementById('delayPlus');
+const delayLabel=document.getElementById('delayLabel');
 
 let mainPlayer, activePlayer, currentCam="cam2";
 let splitMode=0, isMainFull=false, fillMode=false, started=false, inited=false;
 let ticker=null,isScrubbing=false;
 
-/* ===== أدوات العرض ===== */
-function clampToSeekable(video,t){
-  const r=video.seekable; if(!r||!r.length) return t;
-  const start=r.start(r.length-1), end=r.end(r.length-1);
-  return Math.min(Math.max(t, start+0.05), end-0.05);
-}
-function fmt(t){ t=Math.max(0,Math.floor(t||0)); const m=String(Math.floor(t/60)).padStart(2,'0'); const s=String(t%60).padStart(2,'0'); return `${m}:${s}`; }
-function freezeFrom(video){
-  try{
-    const w=root.clientWidth,h=root.clientHeight; freezeLayer.width=w; freezeLayer.height=h;
-    const ctx=freezeLayer.getContext('2d'); ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
-    const rect=(video.getBoundingClientRect && video.parentElement)?video.parentElement.getBoundingClientRect():{width:w,height:h,left:0,top:0};
-    const scaleX=w/rect.width, scaleY=h/rect.height; ctx.save(); ctx.scale(scaleX,scaleY); ctx.drawImage(video,0,0,rect.width,rect.height); ctx.restore(); freezeLayer.style.opacity='1';
-  }catch(e){}
-}
-function unfreeze(){ freezeLayer.style.opacity='0'; }
+/* ========= إنشاء فيديو + إجبار AVC ========= */
+function attachHlsWithAvc(video, url, role){
+  const hls = new Hls({...HLS_CONFIG});
+  video.__hls = hls;
+  hls.attachMedia(video);
+  hls.on(Hls.Events.MEDIA_ATTACHED,()=>{ hls.loadSource(url); });
 
-/* ===== إنشاء الفيديو ===== */
+  hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{
+    try{
+      const levels=data?.levels||[];
+      // اختر أفضل مستوى AVC كبداية
+      const startIdx = pickBestAvc(levels, 360);
+      const maxAvcIdx = highestAvcIndex(levels);
+
+      if(startIdx >= 0){
+        hls.startLevel = startIdx;
+        hls.currentLevel = startIdx;
+        hls.nextLevel = startIdx;
+      }
+      if(maxAvcIdx >= 0){
+        hls.autoLevelCapping = maxAvcIdx; // لا تصعد إلى HEVC
+      }
+    }catch(e){}
+  });
+
+  // منع الانتقال إلى HEVC أثناء التشغيل
+  hls.on(Hls.Events.LEVEL_SWITCHING,(_,data)=>{
+    try{
+      const l = hls.levels?.[data.level];
+      if(l && isHevc(l)){
+        // ابحث عن أقرب مستوى AVC بنفس الارتفاع تقريبًا
+        const lvls = hls.levels||[];
+        const avcCandidates = lvls.map((x,i)=>({i,h:x.height||0,avc:isAvc(x)})).filter(x=>x.avc);
+        if(avcCandidates.length){
+          // اختر أعلى AVC لا يتجاوز 480
+          let best = avcCandidates.reduce((a,b)=> b.h<=480 && b.h>a.h ? b : a, {i:avcCandidates[0].i,h:avcCandidates[0].h});
+          hls.nextLevel = best.i;
+        }
+      }
+    }catch(e){}
+  });
+
+  // تتبع مزامنة PDT
+  hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{
+    const pdtMs=data?.frag?.programDateTime;
+    if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; }
+  });
+
+  // تعافي أخطاء بدون حلقة لا نهائية
+  hls.on(Hls.Events.ERROR,(_,err)=>{
+    const t=err.type, det=String(err.details||'');
+    if(t===Hls.ErrorTypes.NETWORK_ERROR){ try{ hls.stopLoad(); hls.startLoad(); }catch(e){} healGapIfNeeded(video); return; }
+    if(t===Hls.ErrorTypes.MEDIA_ERROR){
+      // لو كان بسبب HEVC، قفز لِـ AVC فوريًا
+      try{
+        const lvls=hls.levels||[]; const anyAvc = lvls.findIndex(isAvc);
+        if(anyAvc>=0){ hls.nextLevel = anyAvc; hls.immediateLevelSwitch?.(); }
+      }catch(e){}
+      try{ hls.recoverMediaError?.(); }catch(e){}
+      return;
+    }
+    if(err.fatal){ try{ hls.destroy(); attachHlsWithAvc(video,url,role); }catch(e){} }
+  });
+
+  return hls;
+}
+
 function createVideo(container, url, role){
   const wrapper=document.createElement('div'); wrapper.style.position='absolute'; wrapper.style.inset='0';
   container.appendChild(wrapper);
+
   const video=document.createElement('video');
   video.autoplay=false; video.playsInline=true; video.controls=false; video.muted=true; video.preload='auto'; video.crossOrigin='anonymous';
   video.style.width='100%'; video.style.height='100%'; video.style.objectFit=((splitMode===2||fillMode)?'cover':'contain');
   wrapper.appendChild(video);
 
-  if (!hasUrl(url)) return video;
-
-  if(/\.m3u8(\?|$)/i.test(url)){
-    if(video.canPlayType('application/vnd.apple.mpegURL')){
-      video.src=url;
-    }else if(window.Hls && Hls.isSupported()){
-      const cfg={...HLS_CONFIG}; const hls=new Hls(cfg); video.__hls=hls; hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED,(_,data)=>{ const idx=pickPlayableLevel(data?.levels||[]); if(idx>=0){ hls.startLevel=idx; hls.currentLevel=idx; hls.nextLevel=idx; }
-        const lvls=data.levels||[]; let capIndex=lvls.findIndex(l=>(l.height||0)>=levelCapFor()); if(capIndex<0) capIndex=lvls.length-1; hls.autoLevelCapping=Math.max(0,capIndex-1); });
-      hls.loadSource(url);
-      hls.on(Hls.Events.LEVEL_UPDATED,(_,data)=>{ if(data?.details?.live){ hls.latencyController?.computeLivePosition?.(); } healGapIfNeeded(video); });
-      hls.on(Hls.Events.FRAG_CHANGED,(_,data)=>{ const pdtMs=data?.frag?.programDateTime; if(pdtMs){ const off=pdtMs/1000 - (video.currentTime||0); if(isFinite(off)) SYNC[role].pdtOffset = off; } });
-      hls.on(Hls.Events.ERROR,(_,err)=>{
-        const d=err||{}; const isNet=d.type===Hls.ErrorTypes.NETWORK_ERROR; const details=String(d.details||'');
-        if(isNet){ try{ hls.stopLoad(); }catch(e){} try{ hls.startLoad(0); }catch(e){} healGapIfNeeded(video); return; }
-        if(/(BUFFER_|FRAG_PARSING|DECODE|MANIFEST_INCOMPATIBLE_CODECS)/i.test(details)){
-          try{ hls.immediateLevelSwitch && hls.immediateLevelSwitch(); }catch(e){} try{ hls.swapAudioCodec?.(); hls.recoverMediaError?.(); }catch(e){} healGapIfNeeded(video); return;
-        }
-        if(d.fatal){ try{ hls.recoverMediaError?.(); }catch(e){} }
-      });
+  if (hasUrl(url)){
+    if(/\.m3u8(\?|$)/i.test(url)){
+      if(window.Hls && Hls.isSupported()){
+        attachHlsWithAvc(video, url, role);
+      }else if(video.canPlayType('application/vnd.apple.mpegURL')){
+        // تشغيل أصلي (Safari) — عادة يدعم HEVC فلا مشكلة
+        video.src=url;
+      }else{
+        video.src=url;
+      }
+    }else if(/\.mpd(\?|$)/i.test(url) && window.dashjs){
+      const p=dashjs.MediaPlayer().create(); p.initialize(video,url,false);
     }else{
       video.src=url;
     }
-  }else if(/\.mpd(\?|$)/i.test(url) && window.dashjs){
-    const p=dashjs.MediaPlayer().create(); p.initialize(video,url,false);
-  }else{
-    video.src=url;
   }
 
-  video.addEventListener('loadedmetadata', ()=>{/* لا تشغيل إلا بعد زر البدء */},{once:true});
-  video.addEventListener('canplay', ()=>{ [...container.children].slice(0,-1).forEach(ch=>{ try{ const v=ch.querySelector?.('video'); v?.pause?.(); v?.__hls?.destroy?.(); ch.remove(); }catch(e){} }); unfreeze(); }, {once:true});
+  video.addEventListener('canplay', ()=>{ [...container.children].slice(0,-1).forEach(ch=>{ try{ const v=ch.querySelector?.('video'); v?.pause?.(); v?.__hls?.destroy?.(); ch.remove(); }catch(e){} }); }, {once:true});
   return video;
 }
 
-/* ===== تشغيل ومزامنة ===== */
+/* ========= تشغيل/مزامنة ========= */
 function positionUtilityDock(){
   const utilityControls=document.getElementById('utilityControls');
   if(root.classList.contains('main-full')){ utilityControls.style.display='none'; globalControls.style.display='none'; return; }
@@ -347,13 +402,6 @@ function positionUtilityDock(){
   }
 }
 window.addEventListener('resize', positionUtilityDock);
-window.addEventListener('orientationchange', ()=>setTimeout(positionUtilityDock,120));
-function applySplitClasses(){
-  root.classList.toggle('split',splitMode!==0);
-  root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode)));
-  [mainContainer,camContainer].forEach(ct=>{ const v=ct.querySelector('video'); if(v){ v.style.objectFit=((splitMode===2||fillMode)?'cover':'contain'); } });
-  positionUtilityDock();
-}
 
 function initPlayers(){
   if(!mainPlayer){ mainPlayer=createVideo(mainContainer, sources.main, 'main'); }
@@ -366,47 +414,47 @@ function initPlayersOnce(){
     const id=btn.getAttribute('data-cam');
     if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
   });
-  updateDelayLabel();
   positionUtilityDock();
+  updateDelayUi();
 }
 
 async function playEntity(ent, muted=true){ try{ ent.muted=!!muted; await ent.play(); }catch(e){} }
-
-async function applyGlobalDelay(){
-  const mv = mainContainer.querySelector('video');
-  if(!mv) return;
-  computeSafeDelay();
-  const m=getSeekableMetrics(mv); if(!m) return;
-  const target = clampToSeekable(mv, m.end - appliedDelaySec);
-  await seekMainTo(target);
-  await seekActiveTo(pdtAlignedTarget(target));
-  updateDelayLabel();
-}
-
-function maintainDelayLoop(){
-  const mv = mainContainer.querySelector('video');
-  if(!mv || mv.paused) return;           // لا نعدّل أثناء الإيقاف
-  const m=getSeekableMetrics(mv); if(!m) return;
-  computeSafeDelay();
-  const current=mv.currentTime||0;
-  const diff=(m.end-current)-appliedDelaySec;
-  if (Math.abs(diff) > 0.6 && !isScrubbing) {
-    seekMainTo(current + diff).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
-  }
-}
-
-function getMainTime(){ if(mainPlayer?.getCurrentTime) return mainPlayer.getCurrentTime(); return Promise.resolve(mainPlayer?.currentTime||0); }
+function getMainTime(){ return Promise.resolve(mainPlayer?.currentTime || 0); }
 function getMainDuration(){
-  if(mainPlayer?.getDuration) return mainPlayer.getDuration();
   if(mainPlayer instanceof HTMLVideoElement){
     const d=mainPlayer.duration; if(isFinite(d)) return Promise.resolve(d||0);
     const r=mainPlayer.seekable; if(r&&r.length) return Promise.resolve(r.end(r.length-1)||0);
   }
   return Promise.resolve(0);
 }
-function seekMainTo(t){ if(mainPlayer?.setCurrentTime) return mainPlayer.setCurrentTime(t).catch(()=>{}); if(mainPlayer?.seekTo){ try{mainPlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.currentTime=clampToSeekable(mainPlayer,t);} return Promise.resolve(); }
-function seekActiveTo(t){ if(activePlayer?.setCurrentTime) return activePlayer.setCurrentTime(t).catch(()=>{}); if(activePlayer?.seekTo){ try{activePlayer.seekTo(t,true);}catch(e){} return Promise.resolve(); } if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
+function seekMainTo(t){ if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.currentTime=clampToSeekable(mainPlayer,t);} return Promise.resolve(); }
+function seekActiveTo(t){ if(activePlayer instanceof HTMLVideoElement){ activePlayer.currentTime=clampToSeekable(activePlayer,t);} return Promise.resolve(); }
 async function syncCams(){ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); }
+
+function updateDelayUi(){
+  document.getElementById('delayLabel').textContent =
+    `Delay: ${globalDelaySec.toFixed(1)}s`;
+}
+
+async function applyGlobalDelay(){
+  const mv = mainContainer.querySelector('video'); if(!mv) return;
+  computeSafeDelay(mv);
+  const m=getSeekableMetrics(mv); if(!m) return;
+  const target = clampToSeekable(mv, m.end - appliedDelaySec);
+  await seekMainTo(target);
+  await seekActiveTo(pdtAlignedTarget(target));
+}
+
+function maintainDelayLoop(){
+  const mv = mainContainer.querySelector('video'); if(!mv || mv.paused) return;
+  const m=getSeekableMetrics(mv); if(!m) return;
+  computeSafeDelay(mv);
+  const current=mv.currentTime||0;
+  const diff=(m.end-current)-appliedDelaySec;
+  if (Math.abs(diff) > 0.7 && !isScrubbing) {
+    seekMainTo(current + diff).then(async ()=>{ const t=await getMainTime(); await seekActiveTo(pdtAlignedTarget(t)); });
+  }
+}
 
 function startTimeTicker(){
   if(ticker) return;
@@ -420,12 +468,12 @@ function startTimeTicker(){
     const target=pdtAlignedTarget(ct); const delta=(activePlayer?.currentTime||0) - target;
     if(!isNaN(delta)) {
       const ad=Math.abs(delta);
-      if(ad < 0.06){ activePlayer.playbackRate=1; }
-      else if(ad < 0.25){ activePlayer.playbackRate = (delta>0?0.985:1.015); }
-      else if(ad < 0.60){ activePlayer.playbackRate = (delta>0?0.95:1.05); }
+      if(ad < 0.08){ activePlayer.playbackRate=1; }
+      else if(ad < 0.30){ activePlayer.playbackRate = (delta>0?0.985:1.015); }
+      else if(ad < 0.70){ activePlayer.playbackRate = (delta>0?0.95:1.05); }
       else { activePlayer.playbackRate = 1; }
     }
-  }, 250);
+  }, 300);
 }
 
 async function startPlayback(){
@@ -439,63 +487,39 @@ async function startPlayback(){
 
   await waitForSeekable(mainContainer.querySelector('video'));
   await applyGlobalDelay();
-  const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt));
+  await syncCams();
 
   startTimeTicker();
   positionUtilityDock();
 }
 
-/* ===== تحكمات ===== */
-function toggleSound(){
+/* ========= تحكمات ========= */
+document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
+  currentCam=id;
+  const old = camContainer.querySelector('video') || mainContainer.querySelector('video');
+  try{ if(old) { old.pause(); } }catch(e){}
+  const newcomer=createVideo(camContainer, sources[id], 'active');
+  newcomer.addEventListener('canplay', async ()=>{ activePlayer=newcomer; if(started){ await playEntity(activePlayer,true); await syncCams(); } }, {once:true});
+});
+
+btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } root.classList.toggle('split',splitMode!==0); root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); });
+btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode; root.classList.toggle('fill',(splitMode!==0&&(splitMode===2||fillMode))); });
+btnSound.addEventListener('click', ()=>{
   if(!started) return;
-  if(mainPlayer instanceof HTMLVideoElement){
-    if(mainPlayer.muted){ mainPlayer.muted=false; mainPlayer.volume=1; mainPlayer.play().catch(()=>{}); }
-    else { mainPlayer.muted=true; }
-    btnSound.dataset.muted=String(!!mainPlayer.muted);
-  }
-}
-function switchCam(cam, btn){
-  if (!hasUrl(window.sources[cam])) return;
-  currentCam=cam; if(btn){ btn.classList.add('btn-loading'); setTimeout(()=>btn.classList.remove('btn-loading'),1200); }
-  const currentVid = camContainer.querySelector('video') || mainContainer.querySelector('video');
-  if(currentVid) freezeFrom(currentVid);
-
-  let newcomer=createVideo(camContainer, sources[cam], 'active');
-  let promoted=false;
-  const promote=async()=>{ if(promoted) return; promoted=true; activePlayer=newcomer; if(started){ await playEntity(activePlayer,true); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); } unfreeze(); };
-  if(newcomer instanceof HTMLVideoElement){
-    newcomer.addEventListener('canplay',promote,{once:true});
-    if(started) newcomer.play().catch(()=>{});
-    setTimeout(()=>{ if(!promoted){ try{ newcomer.__hls?.recoverMediaError?.(); newcomer.load?.(); if(started) newcomer.play?.(); }catch(e){} setTimeout(()=>{ if(!promoted) promote(); }, 800); } }, 3000);
-  } else { promote(); }
-}
-
-document.getElementById('camControls').addEventListener('click',(e)=>{ const b=e.target.closest('button[data-cam]'); if(!b) return; switchCam(b.getAttribute('data-cam'), b); });
-btnSplit.addEventListener('click', ()=>{ splitMode=(splitMode+1)%3; if(splitMode!==0 && isMainFull){ isMainFull=false; root.classList.remove('main-full'); } applySplitClasses(); });
-btnFill.addEventListener('click',  ()=>{ fillMode=!fillMode;  applySplitClasses(); });
-btnSound.addEventListener('click', toggleSound);
-
+  if(mainPlayer instanceof HTMLVideoElement){ mainPlayer.muted = !mainPlayer.muted; if(!mainPlayer.muted) mainPlayer.play().catch(()=>{}); btnSound.dataset.muted=String(!!mainPlayer.muted); }
+});
 gBack.addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t-5); await seekActiveTo(pdtAlignedTarget(t-5)); });
 gFwd .addEventListener('click', async()=>{ if(!started) return; const t=await getMainTime(); await seekMainTo(t+5); await seekActiveTo(pdtAlignedTarget(t+5)); });
-gPlay.addEventListener('click', async()=>{ if(!started) return; if(mainPlayer instanceof HTMLVideoElement){ if(mainPlayer.paused){ await mainPlayer.play().catch(()=>{});} else mainPlayer.pause(); const mt=await getMainTime(); await seekActiveTo(pdtAlignedTarget(mt)); }});
+gPlay.addEventListener('click', async()=>{ if(!started) return; if(mainPlayer.paused){ await mainPlayer.play().catch(()=>{});} else mainPlayer.pause(); await syncCams(); });
 scrub.addEventListener('input', ()=>{ if(!started) return; isScrubbing=true; });
 scrub.addEventListener('change', async()=>{ if(!started) return; const nt=parseFloat(scrub.value)||0; await seekMainTo(nt); await seekActiveTo(pdtAlignedTarget(nt)); isScrubbing=false; });
 
-delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; computeSafeDelay(); updateDelayLabel(); });
+delayRange.addEventListener('input', ()=>{ globalDelaySec=parseFloat(delayRange.value)||0; updateDelayUi(); });
 delayRange.addEventListener('change', ()=>{ if(started) applyGlobalDelay(); });
 delayMinus.addEventListener('click', ()=>{ delayRange.value = Math.max(0, (parseFloat(delayRange.value)||0)-0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
 delayPlus .addEventListener('click', ()=>{ delayRange.value = Math.min(20,(parseFloat(delayRange.value)||0)+0.5); delayRange.dispatchEvent(new Event('input')); if(started) delayRange.dispatchEvent(new Event('change')); });
 
 startBtn.addEventListener('click', startPlayback);
-
-function initPlayersOnce(){
-  if(inited) return; inited=true;
-  if(!mainPlayer){ mainPlayer=createVideo(mainContainer, sources.main, 'main'); }
-  if(!activePlayer){ activePlayer=createVideo(camContainer, sources["cam2"], 'active'); }
-  updateDelayLabel();
-  positionUtilityDock();
-}
-
 window.onYouTubeIframeAPIReady=()=>{ initPlayersOnce(); };
 window.addEventListener('DOMContentLoaded',  ()=>{ initPlayersOnce(); });
 (function autoUi(){ let t=null; const wake=()=>{ document.body.classList.add('ui-awake'); clearTimeout(t); t=setTimeout(()=>document.body.classList.remove('ui-awake'), 1800); }; ['mousemove','touchstart','touchmove','keydown','click'].forEach(ev=>window.addEventListener(ev,wake,{passive:true})); wake();})();
