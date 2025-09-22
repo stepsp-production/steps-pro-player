@@ -3,5 +3,6 @@ main = "src/index.js"
 compatibility_date = "2025-09-01"
 
 [vars]
-ORIGIN_BASE = "https://46.152.17.35"
+# استخدم http لتفادي TLS مع IP؛ غيّرها https لو عندك دومين بشهادة صحيحة
+ORIGIN_BASE = "http://46.152.17.35"
 PROXY_TIMEOUT_MS = "15000"
