@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 import { URL } from "url";
 
 // ===== CONFIG =====
-const ORIGIN_BASE = process.env.ORIGIN_BASE || "https://46.152.116.98";
+const ORIGIN_BASE = process.env.ORIGIN_BASE || "https://46.152.17.35";
 const PORT = process.env.PORT || 10000;
 const ALLOW_INSECURE_TLS = String(process.env.ALLOW_INSECURE_TLS || "true") === "true";
 const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS || 15000);
@@ -241,3 +241,4 @@ app.get("/health", (_req, res) => res.type("text").send("ok"));
 app.listen(PORT, () =>
   console.log("Server on", PORT, "→ origin:", ORIGIN_BASE, "debug:", DEBUG)
 );
+
