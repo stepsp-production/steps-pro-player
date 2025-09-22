@@ -1,9 +1,8 @@
 [build]
   publish = "public"
 
-# إعادة كتابة داخلية: تبقي /hls/* كما هي، لكن تجلبها من Worker
 [[redirects]]
   from = "/hls/*"
-  to = "https://hls-proxy.<your-subdomain>.workers.dev/hls/:splat"
+  to = "https://races-player.it-f2c.workers.dev/hls/:splat"
   status = 200
   force = true
