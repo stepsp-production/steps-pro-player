@@ -410,5 +410,36 @@
       if(e.key==='ArrowRight'){ gFwd.click(); }
     });
   </script>
+  <script>
+  (function addHlsDebug(){
+    const on = (el, ev, fn) => el && el.addEventListener && el.addEventListener(ev, fn);
+
+    function wireDebug(video){
+      const h = video && video.__hls;
+      if(!h) return;
+
+      h.on(Hls.Events.MANIFEST_PARSED, (_, data)=>{
+        console.log('[HLS] MANIFEST_PARSED levels=', (data && data.levels||[]).map(l=>({h:l.height, codecs:l.codecs})));
+      });
+      h.on(Hls.Events.LEVEL_LOADED, (_, data)=>{
+        console.log('[HLS] LEVEL_LOADED targetduration=', data?.details?.targetduration, 'frags=', data?.details?.fragments?.length);
+      });
+      h.on(Hls.Events.ERROR, (_, err)=>{
+        console.error('[HLS] ERROR', err?.type, err?.details, err);
+      });
+    }
+
+    // راقب كل فيديو جديد يتم إنشاؤه
+    const mo = new MutationObserver(()=>{
+      document.querySelectorAll('video').forEach(v=>{
+        if(!v.__debugWired && v.__hls){
+          v.__debugWired = true;
+          wireDebug(v);
+        }
+      });
+    });
+    mo.observe(document.body, {childList:true, subtree:true});
+  })();
+</script>
 </body>
 </html>
