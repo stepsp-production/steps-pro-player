@@ -1,0 +1,13 @@
+name = "hls-proxy"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# بيئة التشغيل
+[vars]
+ORIGIN_BASE = "https://46.152.17.35"
+PROXY_TIMEOUT_MS = "15000"
+
+# ربط مسار الدومين إن عندك دومين على كلودفلير
+# routes = [
+#   { pattern = "hls.yourdomain.com/hls/*", zone_name = "yourdomain.com" }
+# ]
