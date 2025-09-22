@@ -6,3 +6,4 @@
   to = "https://races-player.it-f2c.workers.dev/hls/:splat"
   status = 200
   force = true
+
