@@ -141,19 +141,34 @@
       return max>=0 ? max : (levels?.length? levels.length-1 : -1);
     }
 
+    // نافذة بافر قصيرة + حدود حادة للبث الحي (لا نغيّر أي ميزة UI)
     const HLS_CFG = {
-      lowLatencyMode:false,
-      liveSyncDurationCount:3,
-      capLevelToPlayerSize:true,
-      enableWorker:true,
-      maxBufferHole:1.0,
-      maxSeekHole:2.0,
-      nudgeOffset:0.2,
-      nudgeMaxRetry:6,
-      abrMaxWithRealBitrate:true,
-      fragLoadingMaxRetry:6, manifestLoadingMaxRetry:6, levelLoadingMaxRetry:5,
-      fragLoadingRetryDelay:350, manifestLoadingRetryDelay:500, levelLoadingRetryDelay:500,
-      fragLoadingTimeOut:10000, manifestLoadingTimeOut:8000, levelLoadingTimeOut:8000,
+      lowLatencyMode: false,             // فعّل فقط لو المصدر LL-HLS
+      liveSyncDurationCount: 2,
+      liveMaxLatencyDurationCount: 5,
+      maxLiveSyncPlaybackRate: 1.05,
+
+      // بافر صغير لمنع الانفصال الزمني
+      maxBufferLength: 10,
+      backBufferLength: 10,
+      maxBufferSize: 30 * 1000 * 1000,
+
+      capLevelToPlayerSize: true,
+      enableWorker: true,
+
+      // قفزات فجوات معقولة
+      maxBufferHole: 0.8,
+      maxSeekHole: 1.5,
+      nudgeOffset: 0.15,
+      nudgeMaxRetry: 8,
+
+      abrMaxWithRealBitrate: true,
+
+      // محاولات وإمهال
+      fragLoadingMaxRetry: 6, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 5,
+      fragLoadingRetryDelay: 350, manifestLoadingRetryDelay: 500, levelLoadingRetryDelay: 500,
+      fragLoadingTimeOut: 10000, manifestLoadingTimeOut: 8000, levelLoadingTimeOut: 8000,
+
       xhrSetup:(xhr)=>{ try{ xhr.withCredentials=false; }catch(e){} }
     };
 
@@ -221,12 +236,22 @@
       hls.on(Hls.Events.ERROR,(_,err)=>{
         if(err?.fatal){
           try{ hls.destroy(); }catch(e){}
-          // محاولة بسيطة لإعادة الإنشاء
           try{ attachHlsWithAvc(video, url); }catch(e){}
         }
       });
 
       return hls;
+    }
+
+    function wireStallHandlers(v){
+      const nudge = ()=> {
+        if (!v) return;
+        healGapIfNeeded(v);
+        try{ v.play().catch(()=>{}); }catch(_){}
+      };
+      v.addEventListener('stalled', nudge);
+      v.addEventListener('waiting', nudge);
+      v.addEventListener('suspend', ()=>{});
     }
 
     function createVideo(container, url){
@@ -236,17 +261,17 @@
       v.playsInline=true; v.muted=true; v.controls=false; v.preload='auto'; v.crossOrigin='anonymous';
       v.style.cssText='width:100%;height:100%;object-fit:contain';
       wrap.appendChild(v);
+      wireStallHandlers(v);
 
       if(hasUrl(url) && window.Hls && Hls.isSupported()){
         attachHlsWithAvc(v, url);
       }else if(hasUrl(url) && v.canPlayType('application/vnd.apple.mpegURL')){
         v.src=url;
       }else{
-        v.src=url; // احتياط
+        v.src=url;
       }
 
       v.addEventListener('canplay', ()=>{
-        // إزالة المثال القديم بعد نجاح الجديد
         [...container.children].slice(0,-1).forEach(ch=>{
           try{ const vv=ch.querySelector?.('video'); vv?.pause?.(); vv?.__hls?.destroy?.(); ch.remove(); }catch(e){}
         });
@@ -283,13 +308,27 @@
     }
     function initOnce(){
       initPlayers();
-      // إخفاء الأزرار غير المتوفرة
       document.querySelectorAll('#camControls [data-cam]').forEach(btn=>{
         const id=btn.getAttribute('data-cam');
         if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
       });
     }
     initOnce();
+
+    function hardAlignTo(v, target){
+      try{
+        const t = clampToSeekable(v, target);
+        v.currentTime = t;
+      }catch(e){}
+    }
+
+    function gentleCatchup(v, delta){
+      const ad = Math.abs(delta);
+      if (ad < 0.08){ v.playbackRate = 1.0; return; }
+      if (ad < 0.30){ v.playbackRate = (delta>0? 0.985 : 1.015); return; }
+      if (ad < 0.70){ v.playbackRate = (delta>0? 0.95  : 1.05 ); return; }
+      v.playbackRate = 1.0;
+    }
 
     async function startPlayback(){
       if(started) return;
@@ -300,12 +339,19 @@
       try{ await mainPlayer.play(); }catch(e){}
       try{ await activePlayer.play(); }catch(e){}
 
-      // قف قرب نهاية نافذة البث بأمان لتفادي إعادة التشغيل
       setTimeout(async ()=>{
         await waitForSeekable(mainPlayer);
         const m=getSeekableRange(mainPlayer);
         if(m){ mainPlayer.currentTime = clampToSeekable(mainPlayer, m.end - SAFETY_EDGE); }
       }, 300);
+
+      // تسخين مسبق لكل الكاميرات بدون المساس بالـ UI
+      preheatAll();
+      setTimeout(()=>{
+        Object.values(preheatPool).forEach(v=>{
+          v.play().then(()=> setTimeout(()=> v.pause(), 800)).catch(()=>{});
+        });
+      }, 600);
 
       startTimeTicker();
     }
@@ -321,34 +367,97 @@
         if(d&&isFinite(d)) scrub.max=d;
         scrub.value=ct||0; timeLabel.textContent=`${fmt(ct)} / ${fmt(d||0)}`;
 
-        // تضميد فجوات إن حصل انتظار
+        // تضميد فجوات
         healGapIfNeeded(mainPlayer);
         healGapIfNeeded(activePlayer);
 
-        // مزامنة خفيفة: اجعل الكاميرا تلحق بالرئيسي
+        // مزامنة صارمة مع الخط الرئيسي
         const target = ct;
         const delta = (activePlayer.currentTime||0) - target;
-        const ad = Math.abs(delta);
-        if(ad < 0.08){ activePlayer.playbackRate=1; }
-        else if(ad < 0.30){ activePlayer.playbackRate = (delta>0?0.985:1.015); }
-        else if(ad < 0.70){ activePlayer.playbackRate = (delta>0?0.95:1.05); }
-        else { activePlayer.playbackRate = 1; }
-      }, 300);
+
+        if (Math.abs(delta) > 1.2){
+          hardAlignTo(activePlayer, target);
+          return;
+        }
+        gentleCatchup(activePlayer, delta);
+      }, 250);
     }
 
-    /* ====== تحكمات ====== */
-    startBtn.addEventListener('click', startPlayback);
+    /* ====== تبديل الكاميرات (بدون المساس بالميزات) ====== */
 
-    document.getElementById('camControls').addEventListener('click',(e)=>{
+    // منطقة تسخين مخفية
+    const preheatPool = {};
+    const preheatWrap = document.createElement('div');
+    preheatWrap.style.cssText = 'position:absolute;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;';
+    document.body.appendChild(preheatWrap);
+
+    function preheatCam(id){
+      if (preheatPool[id] || !hasUrl(sources[id])) return;
+      const v = document.createElement('video');
+      v.playsInline = true; v.muted = true; v.controls = false; v.preload = 'auto'; v.crossOrigin='anonymous';
+      v.width = 1; v.height = 1; v.style.opacity='0';
+      preheatWrap.appendChild(v);
+      wireStallHandlers(v);
+
+      if (window.Hls && Hls.isSupported()){
+        const hls = new Hls({...HLS_CFG});
+        v.__hls = hls;
+        hls.attachMedia(v);
+        hls.on(Hls.Events.MEDIA_ATTACHED, ()=> hls.loadSource(sources[id]));
+      } else {
+        v.src = sources[id];
+      }
+      preheatPool[id] = v;
+    }
+
+    function preheatAll(){
+      ["cam1","cam2","cam3","cam4","cam5","cam6","cam7"].forEach(preheatCam);
+    }
+
+    document.getElementById('camControls').addEventListener('mouseover',(e)=>{
+      const b=e.target.closest('button[data-cam]'); if (!b) return;
+      preheatCam(b.getAttribute('data-cam'));
+    });
+
+    document.getElementById('camControls').addEventListener('click', async (e)=>{
       const b=e.target.closest('button[data-cam]'); if(!b) return;
       const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
       currentCam=id;
+
+      const warm = preheatPool[id];
+      if (warm){
+        try{
+          await waitForSeekable(warm, 6000);
+          hardAlignTo(warm, clampToSeekable(warm, mainPlayer.currentTime||0));
+          await warm.play().catch(()=>{});
+        }catch(_){}
+        const wrap=document.createElement('div'); wrap.style.cssText='position:absolute;inset:0';
+        const old = camContainer.lastElementChild;
+        camContainer.appendChild(wrap);
+        wrap.appendChild(warm);
+        warm.style.cssText = 'width:100%;height:100%;object-fit:contain';
+
+        if (old){
+          const ov = old.querySelector?.('video');
+          try{ ov?.pause?.(); ov?.__hls?.destroy?.(); }catch(_){}
+          old.remove();
+        }
+        activePlayer = warm;
+        return;
+      }
+
       const newcomer=createVideo(camContainer, sources[id]);
       newcomer.addEventListener('canplay', async ()=>{
         activePlayer=newcomer;
-        if(started){ try{ await activePlayer.play(); }catch(e){} activePlayer.currentTime = clampToSeekable(activePlayer, mainPlayer.currentTime||0); }
+        if(started){
+          try{ await activePlayer.play(); }catch(e){}
+          activePlayer.currentTime = clampToSeekable(activePlayer, mainPlayer.currentTime||0);
+        }
       }, {once:true});
     });
+
+    /* ====== تحكمات ====== */
+    startBtn.addEventListener('click', startPlayback);
 
     btnSplit.addEventListener('click', ()=>{
       splitMode=(splitMode+1)%3;
@@ -384,6 +493,7 @@
       else { mainPlayer.pause(); }
     });
 
+    let isScrubbing=false;
     scrub.addEventListener('input', ()=>{ if(started) isScrubbing=true; });
     scrub.addEventListener('change', ()=>{
       if(!started) return;
@@ -393,14 +503,12 @@
       isScrubbing=false;
     });
 
-    // تكبير/تصغير على المعاينة الرئيسية بالنقرة (يحافظ على الميزة)
     mainContainer.addEventListener('click', ()=>{
       if(splitMode!==0) return;
       isMainFull=!isMainFull;
       root.classList.toggle('main-full', isMainFull);
     });
 
-    // اختصارات مفيدة
     document.addEventListener('keydown',(e)=>{
       if(e.key===' '||e.key==='Enter'){ e.preventDefault(); startPlayback(); }
       if(e.key==='S'||e.key==='s'){ btnSplit.click(); }
@@ -430,7 +538,6 @@
       });
     }
 
-    // راقب كل فيديو جديد يتم إنشاؤه
     const mo = new MutationObserver(()=>{
       document.querySelectorAll('video').forEach(v=>{
         if(!v.__debugWired && v.__hls){
