@@ -20,14 +20,24 @@
     #mainPreview{position:absolute;top:16px;right:20px;width:22%;height:24%;z-index:6;border:1px solid #fff2;border-radius:18px;cursor:pointer;transition:transform .18s,box-shadow .18s,width .18s,height .18s,top .18s,right .18s,left .18s}
     #mainPreview:hover{box-shadow:0 10px 30px #0008}
     #mainPreview video{display:block;width:100%;height:100%;object-fit:contain}
+
+    /* تقسيم */
     .split #mainPreview{top:0;right:0;width:50%;height:100%;border:0;border-radius:0;cursor:default}
     .split #activeCam{top:0;left:0;right:auto;width:50%;height:100%}
-    .split.fill #mainPreview video,.split.fill #activeCam video{object-fit:cover}
+    /* وضع cover في التقسيم عند تفعيل class fill */
+    .split.fill #mainPreview video,
+    .split.fill #activeCam video{object-fit:cover}
+
+    /* تكبير المعاينة الرئيسية */
     .main-full #mainPreview{top:0;right:0;width:100%;height:100%;z-index:7;border:0;border-radius:0;cursor:zoom-out}
     .main-full #activeCam{display:none}
+    /* عند طلب ملء بدون حواف سوداء في الوضع العادي */
+    .main-full.cover #mainPreview video{object-fit:cover}
+
     .hint{position:absolute;top:20px;right:20px;z-index:8;background:#000a;color:#fff;padding:6px 10px;border-radius:999px;font-size:12px;border:1px solid #fff2}
     .split .hint,.main-full .hint{display:none}
 
+    /* أشرطة/أزرار */
     #utilityControls,#camControls,#globalControls{position:absolute;z-index:10;display:flex;gap:8px;flex-wrap:wrap}
     #utilityControls{top:10px;right:10px}
     #globalControls{bottom:70px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd);align-items:center;min-width:340px}
@@ -46,7 +56,7 @@
     .gate-card .icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--panel-bd);color:#fff;background:#111a;font-size:18px}
     #startBtn{min-width:160px}
 
-    #camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bd)}
+    #camControls{bottom:14px;left:50%;transform:translateX(-50%);background:var(--panel-bg);padding:10px;border-radius:14px;border:1px solid var(--panel-bد)}
 
     @media (orientation: portrait){
       #mainPreview{top:12px;right:14px;width:58vw;height:36vh;border-radius:18px}
@@ -80,11 +90,11 @@
     <!-- أدوات -->
     <div id="utilityControls" role="toolbar" aria-label="أدوات">
       <button id="btnSplit" aria-label="تبديل وضع التقسيم" title="تقسيم">تقسيم</button>
-      <button id="btnFill"  aria-label="تبديل ملء المحتوى" title="ملء">ملء</button>
+      <button id="btnFill"  aria-label="تبديل الملء" title="ملء">ملء</button>
       <button id="btnSound" aria-label="تشغيل/إيقاف الصوت" title="صوت">🔊/🔇</button>
     </div>
 
-    <!-- الشريط الموحّد (بدون Delay) -->
+    <!-- الشريط الموحّد -->
     <div id="globalControls" class="hidden" role="group" aria-label="تحكم موحّد">
       <button id="gBack" title="⏪ -5s">⏪ 5s</button>
       <button id="gPlay" title="⏯">⏯</button>
@@ -124,7 +134,6 @@
     const hasUrl = (u)=> typeof u==='string' && /^\/hls\/.+\.m3u8(\?.*)?$/i.test(u);
     const SAFETY_EDGE = 0.25; // نبتعد قليلًا عن نهاية نافذة البث لتفادي إعادة التحميل
 
-    // إجبار AVC/H.264 فقط وتجنّب HEVC
     function isAvc(l){ return /avc1/i.test(l?.codecs || l?.codecsVideo || ""); }
     function isHevc(l){ return /(hvc1|hev1)/i.test(l?.codecs || l?.codecsVideo || ""); }
     function pickBestAvc(levels, capHeight=480){
@@ -141,34 +150,20 @@
       return max>=0 ? max : (levels?.length? levels.length-1 : -1);
     }
 
-    // نافذة بافر قصيرة + حدود حادة للبث الحي (لا نغيّر أي ميزة UI)
+    // إعدادات Hls.js كما كانت
     const HLS_CFG = {
-      lowLatencyMode: false,             // فعّل فقط لو المصدر LL-HLS
-      liveSyncDurationCount: 2,
-      liveMaxLatencyDurationCount: 5,
-      maxLiveSyncPlaybackRate: 1.05,
-
-      // بافر صغير لمنع الانفصال الزمني
-      maxBufferLength: 10,
-      backBufferLength: 10,
-      maxBufferSize: 30 * 1000 * 1000,
-
-      capLevelToPlayerSize: true,
-      enableWorker: true,
-
-      // قفزات فجوات معقولة
-      maxBufferHole: 0.8,
-      maxSeekHole: 1.5,
-      nudgeOffset: 0.15,
-      nudgeMaxRetry: 8,
-
-      abrMaxWithRealBitrate: true,
-
-      // محاولات وإمهال
-      fragLoadingMaxRetry: 6, manifestLoadingMaxRetry: 6, levelLoadingMaxRetry: 5,
-      fragLoadingRetryDelay: 350, manifestLoadingRetryDelay: 500, levelLoadingRetryDelay: 500,
-      fragLoadingTimeOut: 10000, manifestLoadingTimeOut: 8000, levelLoadingTimeOut: 8000,
-
+      lowLatencyMode:false,
+      liveSyncDurationCount:3,
+      capLevelToPlayerSize:true,
+      enableWorker:true,
+      maxBufferHole:1.0,
+      maxSeekHole:2.0,
+      nudgeOffset:0.2,
+      nudgeMaxRetry:6,
+      abrMaxWithRealBitrate:true,
+      fragLoadingMaxRetry:6, manifestLoadingMaxRetry:6, levelLoadingMaxRetry:5,
+      fragLoadingRetryDelay:350, manifestLoadingRetryDelay:500, levelLoadingRetryDelay:500,
+      fragLoadingTimeOut:10000, manifestLoadingTimeOut:8000, levelLoadingTimeOut:8000,
       xhrSetup:(xhr)=>{ try{ xhr.withCredentials=false; }catch(e){} }
     };
 
@@ -296,7 +291,12 @@
     const scrub=document.getElementById('scrub');
     const timeLabel=document.getElementById('timeLabel');
 
-    let started=false, splitMode=0, fillMode=false, isMainFull=false;
+    let started=false;
+    let splitMode=0;          // 0: عادي، 1: تقسيم (contain), 2: تقسيم (cover)
+    let isMainFull=false;     // تكبير المعاينة الرئيسية
+    let coverMain=false;      // عند التكبير: cover لإزالة الحواف
+    let splitFillPhase=0;     // لتتبع ضغطات "ملء" داخل وضع التقسيم (0→1 contain، 1→2 cover)
+
     let mainPlayer, activePlayer, currentCam='cam2';
     let ticker=null, isScrubbing=false;
 
@@ -312,24 +312,22 @@
         const id=btn.getAttribute('data-cam');
         if(id!=='cam1' && !hasUrl(sources[id])) btn.style.display='none';
       });
+      applyLayout();
     }
     initOnce();
 
-    function hardAlignTo(v, target){
-      try{
-        const t = clampToSeekable(v, target);
-        v.currentTime = t;
-      }catch(e){}
+    /* ====== تطبيق الـ layout بحسب الحالة ====== */
+    function applyLayout(){
+      // تقسيم
+      root.classList.toggle('split', splitMode!==0);
+      root.classList.toggle('fill',  splitMode===2);
+
+      // تكبير المعاينة
+      root.classList.toggle('main-full', isMainFull);
+      root.classList.toggle('cover',     isMainFull && coverMain);
     }
 
-    function gentleCatchup(v, delta){
-      const ad = Math.abs(delta);
-      if (ad < 0.08){ v.playbackRate = 1.0; return; }
-      if (ad < 0.30){ v.playbackRate = (delta>0? 0.985 : 1.015); return; }
-      if (ad < 0.70){ v.playbackRate = (delta>0? 0.95  : 1.05 ); return; }
-      v.playbackRate = 1.0;
-    }
-
+    /* ====== تشغيل أولي ====== */
     async function startPlayback(){
       if(started) return;
       started=true;
@@ -345,14 +343,6 @@
         if(m){ mainPlayer.currentTime = clampToSeekable(mainPlayer, m.end - SAFETY_EDGE); }
       }, 300);
 
-      // تسخين مسبق لكل الكاميرات بدون المساس بالـ UI
-      preheatAll();
-      setTimeout(()=>{
-        Object.values(preheatPool).forEach(v=>{
-          v.play().then(()=> setTimeout(()=> v.pause(), 800)).catch(()=>{});
-        });
-      }, 600);
-
       startTimeTicker();
     }
 
@@ -361,112 +351,66 @@
       ticker=setInterval(()=>{
         if(isScrubbing) return;
 
-        // تحديث الشريط
         let d=0, ct=mainPlayer.currentTime||0;
         const r=mainPlayer.seekable; if(r&&r.length) d=r.end(r.length-1);
         if(d&&isFinite(d)) scrub.max=d;
         scrub.value=ct||0; timeLabel.textContent=`${fmt(ct)} / ${fmt(d||0)}`;
 
-        // تضميد فجوات
         healGapIfNeeded(mainPlayer);
         healGapIfNeeded(activePlayer);
 
-        // مزامنة صارمة مع الخط الرئيسي
         const target = ct;
         const delta = (activePlayer.currentTime||0) - target;
-
         if (Math.abs(delta) > 1.2){
-          hardAlignTo(activePlayer, target);
+          mainPlayer.currentTime = clampToSeekable(mainPlayer, target);
+          activePlayer.currentTime = clampToSeekable(activePlayer, target);
           return;
         }
-        gentleCatchup(activePlayer, delta);
-      }, 250);
+        if (Math.abs(delta) < 0.08){ activePlayer.playbackRate=1; }
+        else if (Math.abs(delta) < 0.30){ activePlayer.playbackRate = (delta>0?0.985:1.015); }
+        else if (Math.abs(delta) < 0.70){ activePlayer.playbackRate = (delta>0?0.95:1.05); }
+        else { activePlayer.playbackRate = 1; }
+      }, 300);
     }
-
-    /* ====== تبديل الكاميرات (بدون المساس بالميزات) ====== */
-
-    // منطقة تسخين مخفية
-    const preheatPool = {};
-    const preheatWrap = document.createElement('div');
-    preheatWrap.style.cssText = 'position:absolute;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;';
-    document.body.appendChild(preheatWrap);
-
-    function preheatCam(id){
-      if (preheatPool[id] || !hasUrl(sources[id])) return;
-      const v = document.createElement('video');
-      v.playsInline = true; v.muted = true; v.controls = false; v.preload = 'auto'; v.crossOrigin='anonymous';
-      v.width = 1; v.height = 1; v.style.opacity='0';
-      preheatWrap.appendChild(v);
-      wireStallHandlers(v);
-
-      if (window.Hls && Hls.isSupported()){
-        const hls = new Hls({...HLS_CFG});
-        v.__hls = hls;
-        hls.attachMedia(v);
-        hls.on(Hls.Events.MEDIA_ATTACHED, ()=> hls.loadSource(sources[id]));
-      } else {
-        v.src = sources[id];
-      }
-      preheatPool[id] = v;
-    }
-
-    function preheatAll(){
-      ["cam1","cam2","cam3","cam4","cam5","cam6","cam7"].forEach(preheatCam);
-    }
-
-    document.getElementById('camControls').addEventListener('mouseover',(e)=>{
-      const b=e.target.closest('button[data-cam]'); if (!b) return;
-      preheatCam(b.getAttribute('data-cam'));
-    });
-
-    document.getElementById('camControls').addEventListener('click', async (e)=>{
-      const b=e.target.closest('button[data-cam]'); if(!b) return;
-      const id=b.getAttribute('data-cam'); if(!hasUrl(sources[id])) return;
-      currentCam=id;
-
-      const warm = preheatPool[id];
-      if (warm){
-        try{
-          await waitForSeekable(warm, 6000);
-          hardAlignTo(warm, clampToSeekable(warm, mainPlayer.currentTime||0));
-          await warm.play().catch(()=>{});
-        }catch(_){}
-        const wrap=document.createElement('div'); wrap.style.cssText='position:absolute;inset:0';
-        const old = camContainer.lastElementChild;
-        camContainer.appendChild(wrap);
-        wrap.appendChild(warm);
-        warm.style.cssText = 'width:100%;height:100%;object-fit:contain';
-
-        if (old){
-          const ov = old.querySelector?.('video');
-          try{ ov?.pause?.(); ov?.__hls?.destroy?.(); }catch(_){}
-          old.remove();
-        }
-        activePlayer = warm;
-        return;
-      }
-
-      const newcomer=createVideo(camContainer, sources[id]);
-      newcomer.addEventListener('canplay', async ()=>{
-        activePlayer=newcomer;
-        if(started){
-          try{ await activePlayer.play(); }catch(e){}
-          activePlayer.currentTime = clampToSeekable(activePlayer, mainPlayer.currentTime||0);
-        }
-      }, {once:true});
-    });
 
     /* ====== تحكمات ====== */
     startBtn.addEventListener('click', startPlayback);
 
+    // زر التقسيم: 3 حالات (بدون تغيير ميزتك الأصلية)
     btnSplit.addEventListener('click', ()=>{
-      splitMode=(splitMode+1)%3;
-      root.classList.toggle('split', splitMode!==0);
-      root.classList.toggle('fill', (splitMode!==0 && (splitMode===2||fillMode)));
+      splitMode = (splitMode + 1) % 3;        // 0 → 1 → 2 → 0
+      splitFillPhase = 0;                      // نعيد مرحلة fill في التقسيم
+      // عند الخروج للوضع العادي لا نغيّر تكبير المعاينة
+      applyLayout();
     });
-    btnFill.addEventListener('click',  ()=>{
-      fillMode=!fillMode;
-      root.classList.toggle('fill', (splitMode!==0 && (splitMode===2||fillMode)));
+
+    // زر الملء — السلوك كما طلبت بالضبط
+    btnFill.addEventListener('click', ()=>{
+      if (splitMode === 0){
+        // الوضع العادي: أول ضغطة → تكبير بدون حواف، الثانية → رجوع
+        if (!isMainFull){
+          isMainFull = true;
+          coverMain  = true;   // إزالة الحواف السوداء
+        } else {
+          // رجّع كما كان
+          isMainFull = false;
+          coverMain  = false;
+        }
+      } else {
+        // وضع التقسيم: أول ضغطة → contain (قليل سواد) ، الثانية → cover (بدون حواف)
+        if (splitFillPhase === 0){
+          splitMode = 1;        // تأكيد contain
+          splitFillPhase = 1;
+        } else if (splitFillPhase === 1){
+          splitMode = 2;        // cover
+          splitFillPhase = 2;
+        } else {
+          // بعد ذلك نتناوب بين 1 و 2
+          splitMode = (splitMode === 2) ? 1 : 2;
+          splitFillPhase = (splitMode === 2) ? 2 : 1;
+        }
+      }
+      applyLayout();
     });
 
     btnSound.addEventListener('click', ()=>{
@@ -475,25 +419,20 @@
       if(!mainPlayer.muted) mainPlayer.play().catch(()=>{});
     });
 
-    gBack.addEventListener('click', ()=>{
+    const gSeek = (ofs)=>{
       if(!started) return;
-      const t=(mainPlayer.currentTime||0)-5;
+      const t=(mainPlayer.currentTime||0)+ofs;
       mainPlayer.currentTime = clampToSeekable(mainPlayer,t);
       activePlayer.currentTime = clampToSeekable(activePlayer,t);
-    });
-    gFwd .addEventListener('click', ()=>{
-      if(!started) return;
-      const t=(mainPlayer.currentTime||0)+5;
-      mainPlayer.currentTime = clampToSeekable(mainPlayer,t);
-      activePlayer.currentTime = clampToSeekable(activePlayer,t);
-    });
+    };
+    gBack.addEventListener('click', ()=> gSeek(-5));
+    gFwd .addEventListener('click', ()=> gSeek( 5));
     gPlay.addEventListener('click', async()=>{
       if(!started) return;
       if(mainPlayer.paused){ try{ await mainPlayer.play(); }catch(e){} }
       else { mainPlayer.pause(); }
     });
 
-    let isScrubbing=false;
     scrub.addEventListener('input', ()=>{ if(started) isScrubbing=true; });
     scrub.addEventListener('change', ()=>{
       if(!started) return;
@@ -503,12 +442,17 @@
       isScrubbing=false;
     });
 
+    // تكبير/تصغير بالنقر على المعاينة (الميزة الأصلية باقية)
     mainContainer.addEventListener('click', ()=>{
-      if(splitMode!==0) return;
+      if(splitMode!==0) return; // فقط في الوضع العادي
       isMainFull=!isMainFull;
-      root.classList.toggle('main-full', isMainFull);
+      // لو كبّر المستخدم بالماوس، احتفظنا بنفس object-fit الافتراضي (contain).
+      // زر "ملء" هو الذي يفرض cover بدون حواف عند التكبير.
+      if (!isMainFull) coverMain=false;
+      applyLayout();
     });
 
+    // اختصارات لوحة المفاتيح (كما هي)
     document.addEventListener('keydown',(e)=>{
       if(e.key===' '||e.key==='Enter'){ e.preventDefault(); startPlayback(); }
       if(e.key==='S'||e.key==='s'){ btnSplit.click(); }
@@ -521,12 +465,9 @@
   
   <script>
   (function addHlsDebug(){
-    const on = (el, ev, fn) => el && el.addEventListener && el.addEventListener(ev, fn);
-
     function wireDebug(video){
       const h = video && video.__hls;
       if(!h) return;
-
       h.on(Hls.Events.MANIFEST_PARSED, (_, data)=>{
         console.log('[HLS] MANIFEST_PARSED levels=', (data && data.levels||[]).map(l=>({h:l.height, codecs:l.codecs})));
       });
@@ -537,7 +478,6 @@
         console.error('[HLS] ERROR', err?.type, err?.details, err);
       });
     }
-
     const mo = new MutationObserver(()=>{
       document.querySelectorAll('video').forEach(v=>{
         if(!v.__debugWired && v.__hls){
