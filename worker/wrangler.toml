@@ -1,6 +1,6 @@
 name = "races-player"
 main = "src/index.js"
-compatibility_date = "2025-09-01"
+compatibility_date = "2025-09-30"
 
 [vars]
 # استخدم http لتفادي TLS مع IP؛ غيّرها https لو عندك دومين بشهادة صحيحة
