@@ -1,8 +1,8 @@
 name = "races-player"
 main = "src/index.js"
-compatibility_date = "2025-09-30"
+compatibility_date = "2025-10-13"
 
 [vars]
 # استخدم http لتفادي TLS مع IP؛ غيّرها https لو عندك دومين بشهادة صحيحة
-ORIGIN_BASE = "https://blvd-frequently-interventions-covering.trycloudflare.com"
+ORIGIN_BASE = "https://coating-entities-camel-distances.trycloudflare.com"
 PROXY_TIMEOUT_MS = "15000"
